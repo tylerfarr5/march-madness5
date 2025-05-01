@@ -89,8 +89,7 @@ stats_2ndhalf <- szn_stats %>%
            defensive_rebounds.x, offensive_rebounds.x, total_rebounds.x,
            fouls.x, 
            free_throws_made.x, free_throws_attempted.x,
-           points_in_paint.x, fast_break_points.x, 
-           turnover_points.x,turnovers.x,
+           turnovers.x,
            #opponent game stats
            opponent_team_id, opponent_team_short_display_name.x, opponent_team_score.x,
            field_goals_made.y, field_goals_attempted.y,
@@ -115,10 +114,7 @@ stats_2ndhalf <- szn_stats %>%
          fouls = fouls.x,
          free_throws_made = free_throws_made.x,
          free_throws_attempted = free_throws_attempted.x,
-         points_in_paint = points_in_paint.x,
-         fast_break_points = fast_break_points.x,
          turnovers = turnovers.x,
-         turnover_points = turnover_points.x,
          opp_team_name = opponent_team_short_display_name.x,
          opp_team_score = opponent_team_score.x,
          opp_field_goals_made = field_goals_made.y,
@@ -127,10 +123,7 @@ stats_2ndhalf <- szn_stats %>%
          opp_three_point_field_goals_attempted = three_point_field_goals_attempted.y,
          opp_turnovers = turnovers.y,
          opp_offensive_rebounds = offensive_rebounds.y
-         ) %>%
-  mutate(points_in_paint = as.integer(points_in_paint),
-         turnover_points = as.integer(turnover_points),
-         fast_break_points = as.integer(fast_break_points))
+         ) 
 
 
 
@@ -157,8 +150,6 @@ temp <- stats_2ndhalf %>%
          opp_ppg = mean(opp_team_score),
          opp_fgpct = sum(opp_field_goals_made)/sum(opp_field_goals_attempted),
          opp_threeptpct = sum(opp_three_point_field_goals_made)/sum(opp_three_point_field_goals_attempted),
-         fast_break_pts = mean(fast_break_points),
-         pts_in_paint = mean(points_in_paint),
          wlpct = sum(team_winner)/n(),
          efgpct = mean((field_goals_made + (0.5*three_point_field_goals_made))/field_goals_attempted),
          mov = mean(team_score - opp_team_score),
@@ -187,14 +178,24 @@ temp <- stats_2ndhalf %>%
 
 ##### Win Rate in Close Games - Adjusted for Sample Size using Bayesian Adjusted Win Rate (Shrinkage Method)
 #Get the global win rate in close games (regardless of home or away)
-global_win_rate_close_gm <- (temp %>%
-                               group_by(team_home_away) %>%
-                               summarise(win_rt = sum(wins_close)/sum(count_close)))[1,2][[1]]
+global_win_rate_close_gm_hm <- (temp %>%
+                                  filter(team_home_away == "home") %>%
+                                  group_by(season) %>%
+                                  summarise(win_rt = sum(wins_close)/sum(count_close)))$win_rt
+
+global_win_rate_close_gm_aw <- (temp %>%
+                                  filter(team_home_away == "away") %>%
+                                  group_by(season) %>%
+                                  summarise(win_rt = sum(wins_close)/sum(count_close)))$win_rt
 #set beta to desired level
 beta <- 10
 #Calculate adjusted win rate
-temp$adj_bayes_win_rate_close <- (temp$wins_close + global_win_rate_close_gm * beta) / (temp$count_close + beta)
-
+temp <- temp %>%
+  rowwise() %>%
+  mutate(adj_bayes_win_rate_close = ifelse(
+    team_home_away == "home", (wins_close + global_win_rate_close_gm_hm * beta) / (count_close + beta),
+    (wins_close + global_win_rate_close_gm_aw * beta) / (count_close + beta)
+  ))
 
 ##### Conference Tournament Performance
 #Get the last game played in the regular season, played by each team (slice max fx)
@@ -226,7 +227,7 @@ players <- load_mbb_player_box()
 neutral_site_flag <- team_game_info %>%
   select(id, game_date, season, neutral_site)
 
-
+#filter player data to desired timeframe and stats
 players_filtered <- players %>%
   inner_join(date_ranges, by = c('season' = 'year')) %>%
   left_join(neutral_site_flag, by = c('game_id' = 'id', 'season' = 'season')) %>%
@@ -244,55 +245,73 @@ players_filtered <- players %>%
             mpg = minutes_/games_played,
             three_point_clip = three_point_made/three_point_att)
 
-
 #want players who have at least 15 minutes per game on the season @ home or away
 players_filtered <- players_filtered %>%
   group_by(athlete_id) %>%
   #the "any" argument counts both entries for someone who had 17 mpg at home and 12 mpg at away. 
-  filter(all(mpg >= 15)) %>%
+  filter(any(mpg >= 15)) %>%
   ungroup()
 
-#want players who have played at least 3 Home and 3 Away games this season
+#want players who have played at least 3 Home, 3 Away games & at least 45 total min this season
 players_filtered <- players_filtered %>%
   group_by(athlete_id) %>%
-  filter(all(games_played >= 3) & all(minutes_ >= 45)) %>%  # removes ID if played < 3 games home or away
+  filter(all(games_played >= 3) & all(minutes_ >= 45)) %>% 
   ungroup()
 
-#aggregate to team level
+#determine the cutoff for # of players attempting a 3 & exploring three point clip rate
+hist(players_filtered$three_point_clip)
+quantile(players_filtered$three_point_clip, c(0.1, 0.25, 0.5, 0.75, 0.9), na.rm = TRUE)
+
+hist(players_filtered$three_point_att) #right skew
+quantile(players_filtered$three_point_att, c(0.1, 0.25, 0.5, 0.75, 0.9))
+
+#this says that for 90% of players to shoot 1.5 threes per away game, they would need to shoot 14 in total
+quantile(players_filtered[players_filtered$team_home_away == "away",]$games*1.5, c(0, 0.1, 0.25, 0.5, 0.75, 0.9, 1))
+#this says that for 90% of players to shoot 1.5 threes per home game, they would need to shoot 12 in total
+quantile(players_filtered[players_filtered$team_home_away == "home",]$games*1.5, c(0, 0.1, 0.25, 0.5, 0.75, 0.9, 1))
+
+#add validated attempts and three point clips
+#i use a formula so 90% of players have at least X three point attempts per [home or away] game
+players_filtered <- players_filtered %>%
+  mutate(valid_att = ifelse(team_home_away == "away" & three_point_att >= floor(quantile(players_filtered[players_filtered$team_home_away == "away",]$games*1.5, 0.1)), 
+                            1, 
+                            ifelse(team_home_away == "home" & three_point_att >= floor(quantile(players_filtered[players_filtered$team_home_away == "home",]$games*1.5, 0.1)), 1, 0)),
+         
+         valid_clip = ifelse(three_point_clip >= 0.35 & valid_att == 1, 1, 0))
+
+#aggregate to team level. want shooters who shot 35% & count # of shooters who attempted at least 2 threes
 players_stats <- players_filtered %>%
-  mutate(tpp = ifelse(three_point_clip >= 0.35,1,0)) %>%
   group_by(season, team_id, team_home_away) %>%
   summarise(starters = n(),
-            threes35 = sum(tpp, na.rm = TRUE))
+            three_point_shooters = sum(valid_att, na.rm = TRUE),
+            threes35 = sum(valid_clip, na.rm = TRUE))
 
-players_stats %>%
-  +   group_by(team_id) %>%
-  +   summarise(
-    +     unique_starters = n_distinct(starters),
-    +     .groups = "drop"
-    +   ) %>%
-  +   filter(unique_starters > 1)
+#data check
+# players_stats %>%
+# group_by(team_id) %>%
+#   summarise(
+#       unique_starters = n_distinct(starters),
+#       .groups = "drop"
+#     ) %>%
+# filter(unique_starters > 1)
 
+#joining player stats to main df
+temp <- temp %>%
+  left_join(players_stats, by = c('team_id' = 'team_id', 'season' = 'season', 'team_home_away' = 'team_home_away'))
 
-^^figure this out:
-  - need to decide if you use "any" or "all" in mpg >=15 filter (ie: UCF has 4 'starters', not 5)
-  - need to decide if you want to split this part out by home/away (ie Florida shows reverse result) -> base = took a 3 pt??
 
 #######
 ## variables to add
 #######
-#adjust global win rates for home and away - should be different for each
-#num players who avg 15+ min (aka "starters")
 #avg age of team for everyone w 15+ min
-# num shooters above 35% 3 pt for everyon w 15+ min
+
+
 
 #then build loop for all other years & join to tourney_teams df
 
-
-#######
-## possible ways to improve
-#######
 #break out stats by Home | Away | Total,, for First and Second Half of Year
+
+#can do median instead of mean for these stats you show
 
 
 #######
