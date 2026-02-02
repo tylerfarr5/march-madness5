@@ -1,3 +1,6 @@
+#Note for code updates each year:
+# 1. check coach_lookup table for NA's. Do you need to recode team names?
+
 library(hoopR)
 library(dplyr)
 library(tidyverse)
@@ -6,9 +9,13 @@ library(stringr)
 library(purrr)
 library(glue)
 library(progress)
+library(rvest)
+library(httr)
+library(httr2)
+library(janitor)
 
 #############################################################################
-#setting up all teams
+#setting up all teams (tourney and all teams)
 #############################################################################
 
 years <- 2008:2025
@@ -47,6 +54,21 @@ tourney_teams <- tourney_teams %>%
   rename(team_id = home_id,
           team_name = home_short_display_name)
 
+
+#Lookup for pro sports reference
+full_team_list_lookup <- NULL
+for(ii in years) {
+  temporary_df <- load_mbb_schedule(seasons = ii)
+  
+  temporary_df2 <- bind_rows(
+    temporary_df %>% select(team_id = home_id, team_name = home_location, season),
+    temporary_df %>%  select(team_id = away_id, team_name = away_location, season)
+  ) %>%
+    distinct()
+  
+  full_team_list_lookup <- rbind(full_team_list_lookup, temporary_df2)
+}
+full_team_list_lookup <- full_team_list_lookup %>% distinct()
 
 ##################################################################################
 ### Joining in the team stats 
@@ -114,30 +136,19 @@ player_exp <- player_exp %>%
 #filter player data to desired timeframe and stats
 seniority_df <- players %>%
   inner_join(date_ranges, by = c('season' = 'year')) %>%
-  left_join(neutral_site_flag, by = c('game_id' = 'id', 'season' = 'season')) %>%
-  #2nd half of season - who's starting now
-  filter(game_date.x >= start_date & game_date.x <= end_date) %>%
-  #setting all neutral site games to away for both teams
-  mutate(team_home_away = ifelse(neutral_site == TRUE, "away", home_away)) %>%
-  group_by(season, team_id, athlete_id, team_home_away) %>%
+  filter(game_date >= as.Date(paste0(year(season)-1, "-10-01")) & game_date <= end_date) %>%
+  group_by(season, team_id, athlete_id) %>%
   #grabbing season averages for these players. use na.rm = TRUE for players who didn't play
   dplyr::summarise(games = n(),
                    games_played = sum(!is.na(minutes) & minutes >0),
                    minutes_ = sum(minutes, na.rm = TRUE),
                    mpg = minutes_/games_played)
 
-#want players who have at least 15 minutes per game on the season @ home or away
+#want players who have at least 150 minutes per game on the season and at least 7.5 mpg
+#aka 15 min per game for 10 games
 seniority_df <- seniority_df %>%
-  group_by(athlete_id) %>%
-  #the "any" argument counts both entries for someone who had 17 mpg at home and 12 mpg at away. 
-  filter(any(mpg >= 15)) %>%
-  ungroup()
-
-#want players who have played at least 3 Home, 3 Away games & at least 45 total min this season
-seniority_df <- seniority_df %>%
-  group_by(athlete_id) %>%
-  filter(all(games_played >= 3) & all(minutes_ >= 45)) %>% 
-  ungroup()
+  filter(minutes_ >= 150) %>%
+  filter(mpg >= 7.5)
 
 
 #### Adding a stat: seniority of team
@@ -423,13 +434,7 @@ coaches_final <- coaches_final %>%
 
 
 
-team_lookup <- bind_rows(
-team_game_info %>%  select(team_id = home_id, team_name = home_location), 
-team_game_info %>%  select(team_id = away_id, team_name = away_location)
-) %>%
-  distinct()
-
-
+#Final coach table Lookup
 coach_lookup <- coaches_final %>%
   mutate(school = recode(
     school,
@@ -463,7 +468,7 @@ coach_lookup <- coaches_final %>%
     "UNC" = "North Carolina",
     .default = school
   )) %>%
-  left_join(team_lookup, by = c('school' = 'team_name'))
+  left_join(full_team_list_lookup, by = c('school' = 'team_name', 'year' = 'season'))
 
 
 
@@ -857,6 +862,7 @@ healthy_rate <- players_filtered %>%
 temp <- temp %>%
   left_join(healthy_rate, by = c('team_id' = 'team_id', 'season' = 'season'))
 
+
 ##### Teams who go on 10+ point scoring runs (aka Kill Shot) in 2nd half
 
 pbp <- load_mbb_pbp(seasons = 2025)
@@ -1029,7 +1035,6 @@ rm(guard_pct)
 rm(healthy_rate)
 rm(last_conf_game)
 rm(pbp)
-rm(players)
 rm(players_filtered)
 rm(players_stats)
 rm(positions)
@@ -1394,6 +1399,7 @@ temp <- temp %>%
   left_join(healthy_rate, by = c('team_id' = 'team_id', 'season' = 'season'))
 
 
+
 ##### Teams who go on 10+ point scoring runs (aka Kill Shot) in 2nd half
 
 pbp <- load_mbb_pbp(seasons = 2025)
@@ -1581,18 +1587,23 @@ weighted_df <- bind_rows(aa, bb, df_first_half_fixed) %>%
 
 coach stats do not consider current W/L of current season
 
-add note to always check NA's in coach table
->> loop through 2008 to 2026 in team_lookup
->> e.g. Hartford is team id 42 but thye don't showup
+
 
 join in coach lookup & seniority lookup to main df
+#Join player experience to temp table
+temp <- temp %>%
+  left_join(player_exp_lookup, by = c('team_id' = 'team_id', 'season' = 'season'))
+
+
 
 remove weights from variables, ie starters should be a whole number
+wlpct, pyth_exp, luck (calc these separately)
 
 write up documentation for variables
 
 
-
+THEN: make a model that is extremely simple. basically copy anthony klemm's project
+>> take 3 inputs to decide: your model, simple model, and chalk / coin flip?
 
 
 compare your model against basic kaggle dataset
@@ -1603,10 +1614,6 @@ have chatgpt review your code, clean it up if necessary, & then loop 2008:2025 t
 # for final model, create and drop the following:
 #DROP:
 - games
-- wins_close, count_close, count_blowout
+- wins_close, count_close
 - starters, threes35, three_point_shooters
 
-
-####Coach MM Performance Logic:
-<> <> <> #separate tab
-<> <> <> #separate tab
