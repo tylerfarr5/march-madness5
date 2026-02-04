@@ -1,5 +1,7 @@
 #Note for code updates each year:
-# 1. check coach_lookup table for NA's. Do you need to recode team names?
+# 1. check coach_lookup table for NA's in team_id col. Do you need to recode team names
+# 2. check coaches_final for exclusions to add
+# 3. Update years + tourney dates under Configuration & Helper Data
 
 library(hoopR)
 library(dplyr)
@@ -15,83 +17,38 @@ library(httr2)
 library(janitor)
 
 #############################################################################
-#setting up all teams (tourney and all teams)
+# --- 1. Configuration & Helper Data ---
 #############################################################################
 
+#Pulling all tournament teams since 2008
 years <- 2008:2025
-tourney_teams <- data.frame(season=integer(),
-                            home_id=integer(), 
-                            home_short_display_name=character(), 
-                            stringsAsFactors=FALSE)
-
-#tournament ID 22 = mrach madness tourney
-#pulling all tournament games since 2008
-for (i in years){
-  temp_yr <- load_mbb_schedule(i)
-  
-  #home
-  temp_hm <- temp_yr %>%
-    filter(tournament_id == 22) %>%
-    dplyr::select(home_id, home_short_display_name)
-  #away
-  temp_aw <- temp_yr %>%
-    filter(tournament_id == 22) %>%
-    dplyr::select(away_id, away_short_display_name)
-  #binding them together, use.names ignores column names
-  temp_tms <- rbind(temp_hm, temp_aw, use.names = FALSE)
-  
-  #add col for year, sel distinct
-  temp_tms <- distinct(
-    temp_tms %>%
-      mutate(season = i) %>%
-      select(season, home_id, home_short_display_name)
-    )
-  
-  tourney_teams <- rbind(tourney_teams, temp_tms)
-}
-
-tourney_teams <- tourney_teams %>%
-  rename(team_id = home_id,
-          team_name = home_short_display_name)
-
-
-#Lookup for pro sports reference
-full_team_list_lookup <- NULL
-for(ii in years) {
-  temporary_df <- load_mbb_schedule(seasons = ii)
-  
-  temporary_df2 <- bind_rows(
-    temporary_df %>% select(team_id = home_id, team_name = home_location, season),
-    temporary_df %>%  select(team_id = away_id, team_name = away_location, season)
-  ) %>%
-    distinct()
-  
-  full_team_list_lookup <- rbind(full_team_list_lookup, temporary_df2)
-}
-full_team_list_lookup <- full_team_list_lookup %>% distinct()
-
-##################################################################################
-### Joining in the team stats 
-###################################################################################
+player_exp_years_lookup <- 2003:2025
 
 #all tourney dates the *Monday* before tourney starts
-tourney_dates <- as.Date(c("2008-03-17", "2009-03-16","2010-03-15", "2011-03-14", 
-                    "2012-03-12", "2013-03-18", "2014-03-17","2015-03-16", "2016-03-14",
-                    "2017-03-13", "2018-03-12", "2019-03-18","2021-03-15", "2022-03-14", 
-                    "2023-03-13", "2024-03-18", "2025-03-17"))
+#Data goes back to 2008, but I go back to 2003 for a player experience variable
+tourney_dates <- as.Date(c("2003-03-17", "2004-03-15", "2005-03-14","2006-03-13", "2007-03-12", 
+                            "2008-03-17", "2009-03-16","2010-03-15", "2011-03-14", 
+                           "2012-03-12", "2013-03-18", "2014-03-17","2015-03-16", "2016-03-14",
+                           "2017-03-13", "2018-03-12", "2019-03-18","2021-03-15", "2022-03-14", 
+                           "2023-03-13", "2024-03-18", "2025-03-17"))
 
 # create a lookup table with start and end dates per year
 #want Jan 1 - start of MM tourney. this is the 2nd half of the season
 date_ranges <- tibble(
-  year = year(tourney_dates),
-  start_date = as.Date(paste0(year(tourney_dates), "-01-01")),
+  season = year(tourney_dates),
+  start_date = as.Date(paste0(year(tourney_dates)-1, "-10-01")),
+  mid_date = as.Date(paste0(year(tourney_dates), "-01-01")),
   end_date = tourney_dates
 )
 
 
-szn_stats <- load_mbb_team_box(seasons = 2025)
-team_game_info <- load_mbb_schedule(seasons = 2025)
-players <- load_mbb_player_box(seasons = 2025)
+#############################################################################
+# # --- 2. Core Dataframes ---
+#############################################################################
+team_game_info <- map_dfr(years, ~load_mbb_schedule(seasons = .x))
+players <- map_dfr(years, ~load_mbb_player_box(seasons = .x))
+players_full_experience <- map_dfr(player_exp_years_lookup, ~load_mbb_player_box(seasons = .x))
+szn_stats   <- map_dfr(years, ~load_mbb_team_box(seasons = .x))
 
 #need a neutral site flag for these games
 neutral_site_flag <- team_game_info %>%
@@ -99,132 +56,94 @@ neutral_site_flag <- team_game_info %>%
 
 
 
+#############################################################################
+### --- 3. Tourney Teams & All Teams ---
+#############################################################################
+
+#tourney teams
+tourney_teams <- team_game_info %>%
+  filter(tournament_id == 22) %>%
+  bind_rows(
+    select(., season, team_id = home_id, team_name = home_short_display_name),
+    select(., season, team_id = away_id, team_name = away_short_display_name)
+  ) %>%
+  drop_na(team_id) %>%
+  distinct(season, team_id, team_name) 
+
+#all teams
+full_team_list_lookup <- team_game_info %>%
+  bind_rows(
+    select(., team_id = home_id, team_name = home_location, season),
+    select(., team_id = away_id, team_name = away_location, season)
+  ) %>%
+  drop_na(team_id) %>%
+  distinct(season, team_id, team_name)
+
+
 ################################################################################
-################################################################################
-### Player Seniority by Seasons Played - Lookup Table
-################################################################################
+### --- 4. Seniority & SMDI Metrics ---
 ################################################################################
 
 
-####Player Seniority Logic:
-#pull every player from 2003 to present
-player_exp <- NULL
-for (zzz in 2003:2026) {
-  
-  hold <- load_mbb_player_box(seasons = zzz) %>%
-    inner_join(date_ranges, by = c('season' = 'year')) %>%
-    #pre-tourney
-    filter(game_date <= end_date) %>%
-    select(athlete_id, season) %>%
-    distinct() 
-  
-  player_exp <- rbind(player_exp, hold)
-  
-}
-
-#use row number function to calculate the number of times the athlete id shows up
-#show up twice? == sophomore
-#show up four? == senior
-player_exp <- player_exp %>%
+#  Player Seniority Logic:
+#Use 2003 to present for players with experience prior to 2008
+#Use row number function to calculate the number of times the athlete id shows up
+#ie: twice? = sophomore, four times? = senior
+player_exp <- players_full_experience %>%
+  inner_join(date_ranges, by = "season") %>%
+  filter(game_date <= end_date) %>%
+  distinct(athlete_id, season) %>%
   arrange(athlete_id, season) %>%
   group_by(athlete_id) %>%
   mutate(years_exp = row_number()) %>%
   ungroup()
 
 
-
-#filter player data to desired timeframe and stats
-seniority_df <- players %>%
-  inner_join(date_ranges, by = c('season' = 'year')) %>%
-  filter(game_date >= as.Date(paste0(year(season)-1, "-10-01")) & game_date <= end_date) %>%
+# Team-level Experience (Avg Exp of rotation players)
+#Rotation player aka 15 min per game for 10 games
+player_exp_lookup <- players %>%
+  inner_join(date_ranges, by = "season") %>%
+  filter(game_date <= end_date) %>%
   group_by(season, team_id, athlete_id) %>%
-  #grabbing season averages for these players. use na.rm = TRUE for players who didn't play
-  dplyr::summarise(games = n(),
-                   games_played = sum(!is.na(minutes) & minutes >0),
-                   minutes_ = sum(minutes, na.rm = TRUE),
-                   mpg = minutes_/games_played)
-
-#want players who have at least 150 minutes per game on the season and at least 7.5 mpg
-#aka 15 min per game for 10 games
-seniority_df <- seniority_df %>%
-  filter(minutes_ >= 150) %>%
-  filter(mpg >= 7.5)
-
-
-#### Adding a stat: seniority of team
-player_exp_lookup <- seniority_df %>%
-  select(season, team_id, athlete_id) %>%
-  distinct %>%
-  left_join(player_exp, by = c('season' = 'season', 'athlete_id' = 'athlete_id')) %>%
+  summarise(mpg = mean(minutes, na.rm = TRUE), 
+            total_min = sum(minutes, na.rm = TRUE), 
+            .groups = "drop") %>%
+  filter(total_min >= 150, mpg >= 7.5) %>%
+  left_join(player_exp, by = c("season", "athlete_id")) %>%
   group_by(season, team_id) %>%
-  summarise(avg_exp = mean(years_exp, na.rm = TRUE))
+  summarise(avg_team_exp = mean(years_exp, na.rm = TRUE), 
+            .groups = "drop")
 
 
+#  Starter/Minute Discrepancy Index (SMDI)
+#Essentially 2024 Kentucky. Dillingham and Sheppard were top freshman scorers, but were never starters
+#aka James Franklin
 
-################################################################################
-################################################################################
-### Starter - Minute Discrepancy Index
-### Ex: 2024 Kentucky. Dillingham and Sheppard were top freshman, but never started games.
-#ie: james franklin rule 
-################################################################################
-################################################################################
-
-### SMDI score:
+### SMDI score: how many of the 5 official starters also led the team in minutes?
 #0 <- Same 5 players start and play the most
 #0.4 <- 2 of top minute players come off bench
 #1.0 <- Lineup starters ≠ rotation core
 
-
-build_smdi_season <- function(season_year) {
-  
-  load_mbb_player_box(seasons = season_year) %>%
-    
-    inner_join(date_ranges, by = c("season" = "year")) %>%
-    
-    # pre-tournament only
-    filter(game_date <= end_date) %>%
-    
-    group_by(season, team_id, athlete_id, athlete_display_name) %>%
-    summarise(
-      games_started = sum(starter, na.rm = TRUE),
-      avg_min = mean(minutes, na.rm = TRUE),
-      .groups = "drop"
-    ) %>%
-    
-    group_by(season, team_id) %>%
-    mutate(
-      starter_rank = rank(-games_started, ties.method = "first"),
-      minutes_rank = rank(-avg_min, ties.method = "first")
-    ) %>%
-    
-    summarise(
-      smdi =
-        1 - length(
-          intersect(
-            athlete_id[starter_rank <= 5],
-            athlete_id[minutes_rank <= 5]
-          )
-        ) / 5,
-      .groups = "drop"
-    ) %>%
-    
-    select(season, team_id, smdi)
-}
-
-
-team_rotation_metrics <- map_dfr(2008:2026, build_smdi_season)
-
-
-
+team_smdi <- players %>%
+  inner_join(date_ranges, by = "season") %>%
+  filter(game_date <= end_date) %>%
+  group_by(season, team_id, athlete_id) %>%
+  summarise(gs = sum(starter, na.rm = TRUE), 
+            mpg = mean(minutes, na.rm = TRUE), 
+            .groups = "drop") %>%
+  group_by(season, team_id) %>%
+  mutate(starter_rank = rank(-gs, ties.method = "first"), 
+         minutes_rank = rank(-mpg, ties.method = "first")) %>%
+  summarise(smdi = 1 - (length(intersect(athlete_id[starter_rank <= 5], 
+                                         athlete_id[minutes_rank <= 5])) / 5), 
+            .groups = "drop")
 
 
 ################################################################################
-################################################################################
-### Coach DF - does the coach have an impact on the outcome of the game
-### **Scraped from ProSportsReference**
-################################################################################
+### --- 5. Coach Dataframe (scraped from ProSportsReference) ---
 ################################################################################
 
+#Does the coach help sway the signal for game outcome?
 #Function to scrape every coach during march madness
 scrape_coaches_season <- function(season_range) {
   url <- glue::glue("https://www.sports-reference.com/cbb/seasons/men/{season_range}-coaches.html")
@@ -248,56 +167,13 @@ scrape_coaches_season <- function(season_range) {
   df
 }
 
-
 #Set the timeframe for the coach
-raw_coaches <- map_dfr(2008:2026, scrape_coaches_season)
+raw_coaches <- map_dfr(years, scrape_coaches_season)
 
-coaches_final <- raw_coaches %>%
-  # Filter out the sub-header rows found in the middle of the table
-  filter(
-    !str_detect(x, "Coach"),
-    !is.na(x),
-    x != ""
-  ) %>%
-  select(
-    coach = x,
-    school = x_2,
-    year,
-    
-    current_w = season,
-    current_l = season_2,
-    
-    tourney_perf = season_6,
-    
-    curr_school_career_w = career_at_current_school_2,
-    curr_school_career_l = career_at_current_school_3,
-    
-    curr_school_career_ncaa_app = career_at_current_school_5,
-    curr_school_career_s16_app = career_at_current_school_6,
-    curr_school_career_f4_app = career_at_current_school_7,
-    curr_school_career_champ = career_at_current_school_8,
-    
-    career_w = career_overall,
-    career_l = career_overall_2,
-    
-    career_ncaa_app = career_overall_4,
-    career_s16_app = career_overall_5,
-    career_f4_app = career_overall_6,
-    career_champ = career_overall_7,
-    
-  ) %>%
-  # Convert numeric columns back to numbers
-  mutate(across(c(year, starts_with("curr"), starts_with("career")), parse_number)) %>%
-  mutate(coach = str_remove(coach, " \\*"))
 
 
 # *** Data cleanup to fix tourney teams that had multiple coaches in season
 #ie: Indiana HC Kelvin Sampson stepped down midseason for recruiting violations
-coaches_final %>%
-  filter(tourney_perf != "") %>%
-  group_by (year, school) %>%
-  summarise(count = n()) %>%
-  filter(count > 1)
 
 #Coaches to remove:
 #2008 Indiana Kelvin Sampson
@@ -309,17 +185,53 @@ coaches_final %>%
 #2023 Texas Chris Beard
 #2024 McNeese State Vernon Hamilton
 #2024 McNeese State Brandon Chambers
-coaches_final <- coaches_final %>%
+
+#Here is a check to see if there are more coaches to remove
+# coaches_final %>%
+#   filter(tourney_perf != "") %>%
+#   group_by (year, school) %>%
+#   summarise(count = n()) %>%
+#   filter(count > 1)
+
+
+exclusions <- tibble(
+  coach = c("Kelvin Sampson", "Ken McDonald", "Bo Ryan", "Will Wade", "Will Wade", "Bill Self", "Chris Beard", "Vernon Hamilton", "Brandon Chambers"),
+  school = c("Indiana", "Western Kentucky", "Wisconsin", "LSU", "LSU", "Kansas", "Texas", "McNeese State", "McNeese State"),
+  year = c(2008, 2012, 2016, 2019, 2022, 2023, 2023, 2024, 2024)
+)
+
+
+coaches_final <- raw_coaches %>%
+  # Filter out the sub-header rows found in the middle of the table
+  filter(!str_detect(x, "Coach") & x != "") %>%
+  select(
+    coach = x, school = x_2, year,
+    current_w = season, current_l = season_2, tourney_perf = season_6,
+    #win/loss does not consider W/L of current season. it is the coach performance for all seasons prior
+    curr_school_career_w = career_at_current_school_2, 
+    curr_school_career_l = career_at_current_school_3,
+    
+    curr_school_career_ncaa_app = career_at_current_school_5,
+    curr_school_career_s16_app = career_at_current_school_6,
+    curr_school_career_f4_app = career_at_current_school_7,
+    curr_school_career_champ = career_at_current_school_8,
+    
+    #win/loss does not consider W/L of current season. it is the coach performance for all seasons prior
+    career_w = career_overall, career_l = career_overall_2,
+    
+    career_ncaa_app = career_overall_4,
+    career_s16_app = career_overall_5,
+    career_f4_app = career_overall_6,
+    career_champ = career_overall_7,
+    
+  ) %>%
+  #remove * from coach name
+  mutate(coach = str_remove(coach, " \\*")) %>%
+  # Convert numeric columns back to numbers
+  mutate(across(c(year, starts_with("curr"), starts_with("career")), parse_number)) %>%
   filter(tourney_perf != "") %>%
-  filter(!(coach == "Kelvin Sampson" & school == "Indiana" & year == 2008)) %>%
-  filter(!(coach == "Ken McDonald" & school == "Western Kentucky" & year == 2012)) %>%
-  filter(!(coach == "Bo Ryan" & school == "Wisconsin" & year == 2016)) %>%
-  filter(!(coach == "Will Wade" & school == "LSU" & year == 2019)) %>%
-  filter(!(coach == "Will Wade" & school == "LSU" & year == 2022)) %>%
-  filter(!(coach == "Bill Self" & school == "Kansas" & year == 2023)) %>%
-  filter(!(coach == "Chris Beard" & school == "Texas" & year == 2023)) %>%
-  filter(!(coach == "Vernon Hamilton" & school == "McNeese State" & year == 2024)) %>%
-  filter(!(coach == "Brandon Chambers" & school == "McNeese State" & year == 2024))
+  anti_join(exclusions, by = c("coach", "school", "year"))
+
 
 
 coaches_final <- coaches_final %>%
@@ -438,9 +350,8 @@ coaches_final <- coaches_final %>%
 coach_lookup <- coaches_final %>%
   mutate(school = recode(
     school,
-    "Albany (NY)" = "UAlbany",
+    "Albany (NY)" = "Albany",
     "American" = "American University",
-    "Appalachian State" = "App State",
     "College of Charleston" = "Charleston",
     "ETSU" = "East Tennessee State",
     "FDU" = "Fairleigh Dickinson",
@@ -464,7 +375,6 @@ coach_lookup <- coaches_final %>%
     "UC-Irvine" = "UC Irvine",
     "UC-San Diego" = "UC San Diego",
     "UCSB" = "UC Santa Barbara",
-    "UMass" = "Massachusetts",
     "UNC" = "North Carolina",
     .default = school
   )) %>%
@@ -472,153 +382,133 @@ coach_lookup <- coaches_final %>%
 
 
 
-
 ################################################################################
-################################################################################
-### Splitting data by 2nd Half of year stats, by home/away as well
-################################################################################
+### --- 6. Split data in to 2nd Half (Home), 2nd Half (Away) ---
 ################################################################################
 
-
-# filter the dataframe using a join and range check so I get 2nd half of season stats
-#2 rows for each game (1 for each team)
-#gets season stats, filters to 2nd half of season, inner join opponent stats, and left join home/away team stats
+#Splits season stats to 2nd half home/away
+#Gets 2 rows for each game (1 for each team)
 stats_2ndhalf <- szn_stats %>%
-  inner_join(date_ranges, by = c('season' = 'year')) %>%
-  inner_join(szn_stats, by = c('game_id' = 'game_id', 'opponent_team_id' = 'team_id')) %>%
+  inner_join(date_ranges, by = 'season') %>%
+  #2nd half of season
+  filter(game_date >= mid_date & game_date <= end_date) %>%
+  inner_join(szn_stats, by = c('game_id', 'opponent_team_id' = 'team_id')) %>%
   left_join(team_game_info, by = c('game_id' = 'id', 'team_id' = 'home_id')) %>%
   left_join(team_game_info, by =c('game_id' = 'id', 'team_id' = 'away_id')) %>%
-  #2nd half of season
-  filter(game_date.x >= start_date.x & game_date.x <= end_date) %>%
   #trimming the duplicated columns & setting all neutral site games to away for both teams
   mutate(neutral_site = coalesce(neutral_site.x, neutral_site.y),
          notes_headline = coalesce(notes_headline.x, notes_headline.y),
          team_home_away = ifelse(neutral_site == TRUE, "away", team_home_away.x),
          tournament_id = coalesce(tournament_id.x, tournament_id.y)) %>%
   #selecting desired columns
-  select  ( #generic game/team info
-            game_id, season.x, game_date.x, team_id, team_short_display_name.x,team_home_away,
-           neutral_site, notes_headline, tournament_id,
-           #team stats
-           team_winner.x, team_score.x,
-           field_goals_made.x, field_goals_attempted.x, assists.x, blocks.x, steals.x, 
-           three_point_field_goals_made.x, three_point_field_goals_attempted.x,
-           defensive_rebounds.x, offensive_rebounds.x, total_rebounds.x,
-           fouls.x, 
-           free_throws_made.x, free_throws_attempted.x,
-           turnovers.x,
-           #opponent game stats
-           opponent_team_id, opponent_team_short_display_name.x, opponent_team_score.x,
-           field_goals_made.y, field_goals_attempted.y,
-           three_point_field_goals_made.y, three_point_field_goals_attempted.y,
-           turnovers.y, offensive_rebounds.y) %>%
-  #renaming a couple columns
-  rename(season = season.x,
-          game_date = game_date.x,
-         team_name = team_short_display_name.x,
-         team_winner = team_winner.x,
-         team_score = team_score.x,
-         field_goals_made = field_goals_made.x,
-         field_goals_attempted = field_goals_attempted.x,
-         assists = assists.x,
-         blocks = blocks.x,
-         steals = steals.x,
-         three_point_field_goals_made = three_point_field_goals_made.x,
-         three_point_field_goals_attempted = three_point_field_goals_attempted.x,
-         defensive_rebounds = defensive_rebounds.x,
-         offensive_rebounds = offensive_rebounds.x,
-         total_rebounds = total_rebounds.x,
-         fouls = fouls.x,
-         free_throws_made = free_throws_made.x,
-         free_throws_attempted = free_throws_attempted.x,
-         turnovers = turnovers.x,
-         opp_team_name = opponent_team_short_display_name.x,
-         opp_team_score = opponent_team_score.x,
-         opp_field_goals_made = field_goals_made.y,
-         opp_field_goals_attempted = field_goals_attempted.y,
-         opp_three_point_field_goals_made = three_point_field_goals_made.y,
-         opp_three_point_field_goals_attempted = three_point_field_goals_attempted.y,
-         opp_turnovers = turnovers.y,
-         opp_offensive_rebounds = offensive_rebounds.y
-         ) 
+  select(
+    # game / team info
+    game_id, season = season.x, game_date = game_date.x,
+    team_id,
+    team_name = team_short_display_name.x,
+    team_home_away,
+    neutral_site, notes_headline, tournament_id,
+    
+    # team stats
+    team_winner = team_winner.x,
+    team_score  = team_score.x,
+    field_goals_made = field_goals_made.x,
+    field_goals_attempted = field_goals_attempted.x,
+    assists = assists.x, 
+    blocks = blocks.x, 
+    steals = steals.x,
+    three_point_field_goals_made = three_point_field_goals_made.x,
+    three_point_field_goals_attempted = three_point_field_goals_attempted.x,
+    defensive_rebounds = defensive_rebounds.x,
+    offensive_rebounds = offensive_rebounds.x,
+    total_rebounds = total_rebounds.x,
+    fouls = fouls.x,
+    free_throws_made = free_throws_made.x,
+    free_throws_attempted = free_throws_attempted.x,
+    turnovers = turnovers.x,
+    
+    # opponent stats
+    opponent_team_id,
+    opp_team_score = opponent_team_score.x,
+    opp_field_goals_made = field_goals_made.y,
+    opp_field_goals_attempted = field_goals_attempted.y,
+    opp_three_point_field_goals_made = three_point_field_goals_made.y,
+    opp_three_point_field_goals_attempted = three_point_field_goals_attempted.y,
+    opp_turnovers = turnovers.y,
+    opp_offensive_rebounds = offensive_rebounds.y
+  )
 
 
-
-##################################################################################
-### Wrangle data to get home/away formats
-
-#temp is showing every game of the season for each team. shows each teams stats grouped by season and home/away
-#I filter to only the tournament teams here too. Not interested in the rest of the league
-###################################################################################
-
-
-temp <- stats_2ndhalf %>%
+# team stats grouped by season and home/away. only tournament teams
+team_season_stats <- stats_2ndhalf %>%
   #average up stats group by home and away
   group_by(season, team_id, team_home_away) %>%
-  mutate(games = n(),
-          fgpct = sum(field_goals_made)/sum(field_goals_attempted),
-         threeptpct = sum(three_point_field_goals_made)/sum(three_point_field_goals_attempted),
-         ftpct = sum(free_throws_made)/sum(free_throws_attempted),
-         treb = mean(total_rebounds),
-         oreb = mean(offensive_rebounds),
-         dreb = mean(defensive_rebounds),
-         ast = mean(assists),
-         stl = mean(steals),
-         blk = mean(blocks),
-         to = mean(turnovers),
-         pers_fouls = mean(fouls),
-         ppg = mean(team_score),
-         opp_ppg = mean(opp_team_score),
-         opp_fgpct = sum(opp_field_goals_made)/sum(opp_field_goals_attempted),
-         opp_threeptpct = sum(opp_three_point_field_goals_made)/sum(opp_three_point_field_goals_attempted),
-         wlpct = sum(team_winner)/n(),
-         efgpct = mean((field_goals_made + (0.5*three_point_field_goals_made))/field_goals_attempted),
-         mov = mean(team_score - opp_team_score),
+  mutate(games           = n(),
+         fgpct           = sum(field_goals_made)/sum(field_goals_attempted),
+         threeptpct      = sum(three_point_field_goals_made)/sum(three_point_field_goals_attempted),
+         ftpct           = sum(free_throws_made)/sum(free_throws_attempted),
+         treb            = mean(total_rebounds),
+         oreb            = mean(offensive_rebounds),
+         dreb            = mean(defensive_rebounds),
+         ast             = mean(assists),
+         stl             = mean(steals),
+         blk             = mean(blocks),
+         to              = mean(turnovers),
+         pers_fouls      = mean(fouls),
+         ppg             = mean(team_score),
+         opp_ppg         = mean(opp_team_score),
+         opp_fgpct       = sum(opp_field_goals_made)/sum(opp_field_goals_attempted),
+         opp_threeptpct  = sum(opp_three_point_field_goals_made)/sum(opp_three_point_field_goals_attempted),
+         wins            = sum(team_winner),
+         efgpct          = mean((field_goals_made + (0.5*three_point_field_goals_made))/field_goals_attempted),
+         mov             = mean(team_score - opp_team_score),
          
          #formulas found online to estimate pace, efficiency, extra Scoring chances
-         pace = mean(field_goals_attempted - offensive_rebounds + turnovers + (0.455 * free_throws_attempted)),
-         unadj_off_eff = sum(team_score)/sum(field_goals_attempted - offensive_rebounds + turnovers + (0.455 * free_throws_attempted)),
-         unadj_def_eff = sum(opp_team_score)/sum(field_goals_attempted - offensive_rebounds + turnovers + (0.455 * free_throws_attempted)),
+         pace            = mean(field_goals_attempted - offensive_rebounds + turnovers + (0.455 * free_throws_attempted)),
+         unadj_off_eff   = sum(team_score)/sum(field_goals_attempted - offensive_rebounds + turnovers + (0.455 * free_throws_attempted)),
+         unadj_def_eff   = sum(opp_team_score)/sum(field_goals_attempted - offensive_rebounds + turnovers + (0.455 * free_throws_attempted)),
          extraScoreChances = mean(offensive_rebounds + opp_turnovers - opp_offensive_rebounds - turnovers),
          
-         #calculate pythagorean expected win % and luck using coefficient I calculated
-         total_points = sum(team_score),
+         #use for pythagorean expectation calculation latre on
+         total_points     = sum(team_score),
          total_opp_points = sum(opp_team_score),
-         pyth_exp = sum(team_score)^11/(sum(team_score)^11 + sum(opp_team_score)^11),
-         luck = mean(pyth_exp - wlpct),
          
          #additional ratios from talk with Russ Spicer
-         oppTO_teamTO_ratio = sum(opp_turnovers)/sum(turnovers),
-         ast_TO_ratio = sum(assists)/sum(turnovers),
-         wins_close = sum(ifelse(abs(team_score- opp_team_score)<=5, team_winner, 0)),
-         count_close = sum(ifelse(abs(team_score-opp_team_score)<=5, 1, 0)),
-         count_blowout = sum(ifelse(abs(team_score-opp_team_score)>=20, 1, 0))
+         oppTO_teamTO_ratio   = sum(opp_turnovers)/sum(turnovers),
+         ast_TO_ratio         = sum(assists)/sum(turnovers),
+         wins_close           = sum(ifelse(abs(team_score- opp_team_score)<=5, team_winner, 0)),
+         count_close          = sum(ifelse(abs(team_score-opp_team_score)<=5, 1, 0)),
+         count_blowout        = sum(ifelse(abs(team_score-opp_team_score)>=20, 1, 0)),
+         close_pct            = count_close / games,
+         blowout_pct          = count_blowout / games
   ) %>% #only want tourney teams; creates flag to find them
-  left_join(tourney_teams, by = c('season' = 'season', 'team_id' = 'team_id')) %>%
-    mutate(tourney_team_flag = ifelse(!is.na(team_name.y),1,0)) %>%
-    select(-team_name.y) %>%
-    rename(team_name = team_name.x)
+  left_join(tourney_teams, by = c('season', 'team_id')) %>%
+  mutate(tourney_team_flag = ifelse(!is.na(team_name.y),1,0)) %>%
+  select(-team_name.y) %>%
+  rename(team_name = team_name.x)
 
 
+################################################################################
+### --- 7. Additional Vars for 2nd Half (Home), 2nd Half (Away) ---
+################################################################################
 
-#Additional Variables:
 
-##### Win Rate in Close Games - Adjusted for Sample Size using Bayesian Adjusted Win Rate (Shrinkage Method)
-#Get the global win rate in close games
-#select distinct teams to get a global win % across all teams in conf
-# i am assuming if they play in 0 cloes games, then they have the ncaa/tourney teams average in winning close games
+####
+# Adjusted Win Rate for Close Games
+####
 
-global_win_rate_close_gm_hm <- temp %>%
-  filter(team_home_away == "home" & tourney_team_flag ==1) %>%
-  select(season, team_id, team_name, wins_close, count_close) %>%
-  distinct() %>%
+#adjust sample size using Bayesian Adj Win Rate ("shrinkage method")
+#basically use the global win rate in cloes games & if the team has 0 close games, impute the global win rate
+
+global_win_rate_close_gm_hm <- team_season_stats %>%
+  filter(team_home_away == "home", tourney_team_flag ==1) %>%
+  distinct(season, team_id, team_name, wins_close, count_close) %>%
   group_by(season) %>%
   mutate(close_win_pct = wins_close/count_close)
 
-global_win_rate_close_gm_aw <- temp %>%
-  filter(team_home_away == "away"  & tourney_team_flag ==1) %>%
-  select(season, team_id, team_name, wins_close, count_close) %>%
-  distinct() %>%
+global_win_rate_close_gm_aw <- team_season_stats %>%
+  filter(team_home_away == "away", tourney_team_flag ==1) %>%
+  distinct(season, team_id, team_name, wins_close, count_close) %>%
   group_by(season) %>%
   mutate(close_win_pct = wins_close/count_close)
 
@@ -638,19 +528,13 @@ aw_beta <- (1 - aw_mu_hat) * ((aw_mu_hat * (1 - aw_mu_hat) / aw_var_hat) - 1)
 
 #Calculate adjusted win rate
 
-temp <- temp %>%
+team_season_stats <- team_season_stats %>%
   rowwise() %>%
   mutate(adj_bayes_win_rate_close = ifelse(
     team_home_away == "home", 
       (wins_close + hm_alpha) / (count_close + hm_alpha + hm_beta), #home
       (wins_close + aw_alpha) / (count_close + aw_alpha + aw_beta) #away
   )) 
-
-
-#Calculating % of games that are close & blowouts
-temp <- temp %>%
-  mutate(close_pct = count_close / games,
-         blowout_pct = count_blowout / games)
 
 
 ##### Conference Tournament Performance
@@ -979,8 +863,8 @@ temp <- temp %>%
 final_df <- temp %>%
   select(season, team_id, team_name, team_home_away, tourney_team_flag, conf_perf, 
          games, fgpct, threeptpct, ftpct, treb, oreb, dreb, ast, stl, blk, to, pers_fouls, 
-         ppg, opp_ppg, opp_fgpct, opp_threeptpct, wlpct, efgpct, mov, pace, unadj_off_eff, unadj_def_eff,
-         extraScoreChances, pyth_exp, luck, oppTO_teamTO_ratio, ast_TO_ratio, foul_out_total, wins_close, count_close, adj_bayes_win_rate_close, close_pct, blowout_pct,
+         ppg, opp_ppg, opp_fgpct, opp_threeptpct, efgpct, mov, pace, unadj_off_eff, unadj_def_eff,
+         extraScoreChances, wins, total_points, total_opp_points, oppTO_teamTO_ratio, ast_TO_ratio, foul_out_total, wins_close, count_close, adj_bayes_win_rate_close, close_pct, blowout_pct,
          starters, three_point_shooters, threes35, three_pt_shooters_at_35pct_pct, starters_shooting_threes_pct, kill_shot_count, pct_guards, healthy_rate) %>%
     distinct()
 
@@ -1165,7 +1049,7 @@ temp <- stats_1sthalf %>%
          opp_ppg = mean(opp_team_score),
          opp_fgpct = sum(opp_field_goals_made)/sum(opp_field_goals_attempted),
          opp_threeptpct = sum(opp_three_point_field_goals_made)/sum(opp_three_point_field_goals_attempted),
-         wlpct = sum(team_winner)/n(),
+         wins = sum(team_winner),
          efgpct = mean((field_goals_made + (0.5*three_point_field_goals_made))/field_goals_attempted),
          mov = mean(team_score - opp_team_score),
          
@@ -1175,18 +1059,18 @@ temp <- stats_1sthalf %>%
          unadj_def_eff = sum(opp_team_score)/sum(field_goals_attempted - offensive_rebounds + turnovers + (0.455 * free_throws_attempted)),
          extraScoreChances = mean(offensive_rebounds + opp_turnovers - opp_offensive_rebounds - turnovers),
          
-         #calculate pythagorean expected win % and luck using coefficient I calculated
+         #used for pythagorean expectation
          total_points = sum(team_score),
          total_opp_points = sum(opp_team_score),
-         pyth_exp = sum(team_score)^11/(sum(team_score)^11 + sum(opp_team_score)^11),
-         luck = mean(pyth_exp - wlpct),
          
          #additional ratios from talk with Russ Spicer
          oppTO_teamTO_ratio = sum(opp_turnovers)/sum(turnovers),
          ast_TO_ratio = sum(assists)/sum(turnovers),
          wins_close = sum(ifelse(abs(team_score- opp_team_score)<=5, team_winner, 0)),
          count_close = sum(ifelse(abs(team_score-opp_team_score)<=5, 1, 0)),
-         count_blowout = sum(ifelse(abs(team_score-opp_team_score)>=20, 1, 0))
+         count_blowout = sum(ifelse(abs(team_score-opp_team_score)>=20, 1, 0)),
+         close_pct            = count_close / games,
+         blowout_pct          = count_blowout / games
   ) %>% #only want tourney teams; creates flag to find them
   left_join(tourney_teams, by = c('season' = 'season', 'team_id' = 'team_id')) %>%
   mutate(tourney_team_flag = ifelse(!is.na(team_name.y),1,0)) %>%
@@ -1222,12 +1106,6 @@ beta <- (1 - mu_hat) * ((mu_hat * (1 - mu_hat) / var_hat) - 1)
 temp <- temp %>%
   rowwise() %>%
   mutate(adj_bayes_win_rate_close = (wins_close + alpha) / (count_close + alpha + beta))
-
-
-#Calculating % of games that are close & blowouts
-temp <- temp %>%
-  mutate(close_pct = count_close / games,
-         blowout_pct = count_blowout / games)
 
 
 ##### Players who Avg 15+ Minutes (aka "starters")
@@ -1500,8 +1378,8 @@ temp <- temp %>%
 final_df_1sthalf <- temp %>%
   select(season, team_id, team_name, tourney_team_flag, 
          games, fgpct, threeptpct, ftpct, treb, oreb, dreb, ast, stl, blk, to, pers_fouls, 
-         ppg, opp_ppg, opp_fgpct, opp_threeptpct, wlpct, efgpct, mov, pace, unadj_off_eff, unadj_def_eff,
-         extraScoreChances, pyth_exp, luck, oppTO_teamTO_ratio, ast_TO_ratio, foul_out_total, wins_close, count_close, adj_bayes_win_rate_close, close_pct, blowout_pct, 
+         ppg, opp_ppg, opp_fgpct, opp_threeptpct, efgpct, mov, pace, unadj_off_eff, unadj_def_eff,
+         extraScoreChances, wins, total_points, total_opp_points, oppTO_teamTO_ratio, ast_TO_ratio, foul_out_total, wins_close, count_close, adj_bayes_win_rate_close, close_pct, blowout_pct, 
          starters, three_point_shooters, threes35, three_pt_shooters_at_35pct_pct, starters_shooting_threes_pct, kill_shot_count, pct_guards, healthy_rate) %>%
   distinct()
 
@@ -1536,7 +1414,7 @@ weight_2hh <- 0.4
 aa <- final_df_home %>%
    mutate(
      across(
-       where(is.numeric) & !c(tourney_team_flag, games), 
+       where(is.numeric) & !c(tourney_team_flag, games, wins, total_points, total_opp_points), 
        ~ .x * weight_2hh
      )
    )
@@ -1545,7 +1423,7 @@ aa <- final_df_home %>%
 bb <- final_df_away %>%
   mutate(
     across(
-      where(is.numeric) & !c(tourney_team_flag, games), 
+      where(is.numeric) & !c(tourney_team_flag, games, wins, total_points, total_opp_points), 
       ~ .x * weight_2ha
     )
   )
@@ -1553,7 +1431,7 @@ bb <- final_df_away %>%
 cc <- final_df_1sthalf %>%
   mutate(
     across(
-      where(is.numeric) & !c(tourney_team_flag, games), 
+      where(is.numeric) & !c(tourney_team_flag, games, wins, total_points, total_opp_points), 
       ~ .x * weight_1h
     )
   )
@@ -1578,42 +1456,27 @@ weighted_df <- bind_rows(aa, bb, df_first_half_fixed) %>%
   filter(tourney_team_flag ==1)
 
 
+chocolate_milk <- weighted_df %>%
+  left_join(select(coach_lookup, -coach, -school), by = c('team_id' = 'team_id', 'season' = 'year')) %>%
+  left_join(player_exp_lookup, by = c("season", "team_id")) %>%
+  left_join(team_rotation_metrics, by = c("season", "team_id")) %>%
+  #create pythagorean exp & wlPct AFTER weighting since I don't want to weight these
+  mutate(wlpct = wins/ games,
+         pyth_exp = total_points^11/(total_points^11 + total_opp_points^11),
+         luck = pyth_exp - wlpct) %>%
+  #drop variables that are not needed for final model
+  select(-wins_close, -count_close, -starters, 
+         -three_point_shooters, -threes35, -tourney_team_flag,
+         -wins, -total_points, -total_opp_points, -games)
+
+
 ####################################################################################
-#add variable: 
-- [x] head coach stats
-- [x] count of player ID for "seniority"
-- [x] SMDI mislabeled_starters = investigate 2024 kentucky.... apparently dillingham & reed sheppard were the best players but they were coming off the bench. a bad decision/"james franklin" favs situation with calipari
-- [x] % of players who foul out? if personal_fouls = 5, then they fouled out
-
-coach stats do not consider current W/L of current season
-
-
-
-join in coach lookup & seniority lookup to main df
-#Join player experience to temp table
-temp <- temp %>%
-  left_join(player_exp_lookup, by = c('team_id' = 'team_id', 'season' = 'season'))
-
-
-
-remove weights from variables, ie starters should be a whole number
-wlpct, pyth_exp, luck (calc these separately)
+have chatgpt review your code, clean it up if necessary, & then loop 2008:2025 to create full df
+>> up to line 386 now (before 2nd H split)
+>> you made date_ranges 1 table (start, mid, and end date)
 
 write up documentation for variables
 
 
 THEN: make a model that is extremely simple. basically copy anthony klemm's project
 >> take 3 inputs to decide: your model, simple model, and chalk / coin flip?
-
-
-compare your model against basic kaggle dataset
-
-
-have chatgpt review your code, clean it up if necessary, & then loop 2008:2025 to create full df
-
-# for final model, create and drop the following:
-#DROP:
-- games
-- wins_close, count_close
-- starters, threes35, three_point_shooters
-
