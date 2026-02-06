@@ -1,7 +1,8 @@
 #Note for code updates each year:
 # 1. check coach_lookup table for NA's in team_id col. Do you need to recode team names
-# 2. check coaches_final for exclusions to add
-# 3. Update years + tourney dates under Configuration & Helper Data
+# 2. check coaches_final for exclusions to add (ie remove a coach for retiring or scandal)
+# 3. check conf_perf for teams that win any round other than Final
+# 4. Update years + tourney dates under Configuration & Helper Data
 
 library(hoopR)
 library(dplyr)
@@ -114,6 +115,8 @@ player_exp_lookup <- players %>%
   summarise(avg_team_exp = mean(years_exp, na.rm = TRUE), 
             .groups = "drop")
 
+rm(players_full_experience)
+rm(player_exp_years_lookup)
 
 #  Starter/Minute Discrepancy Index (SMDI)
 #Essentially 2024 Kentucky. Dillingham and Sheppard were top freshman scorers, but were never starters
@@ -498,63 +501,68 @@ team_season_stats <- stats_2ndhalf %>%
 ####
 
 #adjust sample size using Bayesian Adj Win Rate ("shrinkage method")
-#basically use the global win rate in cloes games & if the team has 0 close games, impute the global win rate
+#basically use the global win rate in close games & if the team has 0 close games, impute the global win rate
 
-global_win_rate_close_gm_hm <- team_season_stats %>%
-  filter(team_home_away == "home", tourney_team_flag ==1) %>%
-  distinct(season, team_id, team_name, wins_close, count_close) %>%
-  group_by(season) %>%
-  mutate(close_win_pct = wins_close/count_close)
 
-global_win_rate_close_gm_aw <- team_season_stats %>%
-  filter(team_home_away == "away", tourney_team_flag ==1) %>%
-  distinct(season, team_id, team_name, wins_close, count_close) %>%
-  group_by(season) %>%
-  mutate(close_win_pct = wins_close/count_close)
+# calculate Bayesian Priors (mu + var) for home/away, season
+priors <- team_season_stats %>%
+  filter(tourney_team_flag == 1) %>%
+  distinct(season, team_id, wins_close, count_close) %>%
+  group_by(season, team_home_away) %>%
+  summarise(
+    mu  = sum(wins_close)/ sum(count_close),
+    var = var(wins_close / count_close, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  #alpha/beta for weights to mu/var
+  mutate(
+    alpha = mu * (((mu * (1 - mu)) / var) - 1),
+    beta  = (1 - mu) * (((mu * (1 - mu)) / var) - 1)
+  )
 
-#average win % in home games + variance
-hm_mu_hat <- mean(global_win_rate_close_gm_hm$close_win_pct, na.rm = TRUE)
-hm_var_hat <- var(global_win_rate_close_gm_hm$close_win_pct, na.rm = TRUE)
-#average win % in away games + variance
-aw_mu_hat <- mean(global_win_rate_close_gm_aw$close_win_pct, na.rm = TRUE)
-aw_var_hat <- var(global_win_rate_close_gm_aw$close_win_pct, na.rm = TRUE)
-
-#alpha, beta for home & away
-hm_alpha <- hm_mu_hat * ((hm_mu_hat * (1 - hm_mu_hat) / hm_var_hat) - 1)
-hm_beta <- (1 - hm_mu_hat) * ((hm_mu_hat * (1 - hm_mu_hat) / hm_var_hat) - 1)
-
-aw_alpha <- aw_mu_hat * ((aw_mu_hat * (1 - aw_mu_hat) / aw_var_hat) - 1)
-aw_beta <- (1 - aw_mu_hat) * ((aw_mu_hat * (1 - aw_mu_hat) / aw_var_hat) - 1)
-
-#Calculate adjusted win rate
-
+#calculate adj bayes win rate
 team_season_stats <- team_season_stats %>%
-  rowwise() %>%
-  mutate(adj_bayes_win_rate_close = ifelse(
-    team_home_away == "home", 
-      (wins_close + hm_alpha) / (count_close + hm_alpha + hm_beta), #home
-      (wins_close + aw_alpha) / (count_close + aw_alpha + aw_beta) #away
-  )) 
+  left_join(priors, by = c("season", "team_home_away")) %>%
+  mutate(
+    adj_bayes_win_rate_close = (wins_close + alpha) / (count_close + alpha + beta)
+  ) %>%
+  # Clean up temporary prior columns
+  select(-mu, -var, -alpha, -beta)
 
 
-##### Conference Tournament Performance
-#Get the last game played in the regular season, played by each team (slice max fx)
-last_conf_game <- temp %>%
-  group_by(team_id) %>%
+
+
+####
+# Conference Tournament Performance
+####
+
+# Get the last game played in the regular season (use slice max)
+last_conf_game <- team_season_stats %>%
+  group_by(season, team_id) %>%
   slice_max(order_by = game_date, n=1, with_ties = FALSE) %>%
   #uses stringR notation to clean up conference performance to easy to interpret format
-  mutate(cleaned = str_remove(notes_headline, " AT .*") ,
+  mutate(cleaned = str_to_title(str_remove(notes_headline, " AT .*")),
+         # Remove trailing city/state (e.g., " TULSA OK") after "Finals"
+         cleaned = str_remove(cleaned, "(?<=Finals)\\s+.*$"),
+         
+         # 2. Extract the round info
          clean_conf = str_extract(cleaned, "[^-]+$"),
-         conf1 = str_replace_all(clean_conf, "(?i)\\b[1-4](st|nd|rd|th)? Round\\b", "Early Round"),
+         clean_conf = str_trim(clean_conf), # Ensure no trailing whitespace
+         
+         # 3. Standardize "Finals" to "Final"
+         conf1 = str_replace_all(clean_conf, "(?i)\\bFinals\\b", "Final"),
+         
+         # 4. Existing standardization logic
+         conf1 = str_replace_all(conf1, "(?i)\\b[1-4](st|nd|rd|th)? Round\\b", "Early Round"),
          conf1 = str_replace_all(conf1, regex("\\bQtrfinals\\b", ignore_case = TRUE), "Quarterfinals"),
          conf1 = str_replace_all(conf1, regex("\\bQuarterfinal\\b", ignore_case = TRUE), "Quarterfinals"),
          conf1 = str_replace_all(conf1, regex("\\bSemis\\b", ignore_case = TRUE), "Semifinals"),
          conf1 = str_replace_all(conf1, regex("\\bSemi-final\\b", ignore_case = TRUE), "Semifinals"),
-         conf1 = str_replace_all(conf1, regex("\\bQtrfinals\\b", ignore_case = TRUE), "Quarterfinals")) %>%
-  #clean up for teams who didn't play in conference tournament
+         conf1 = str_replace_all(conf1, regex("\\bSemifinal\\b", ignore_case = TRUE), "Semifinals")) %>%
+  # Clean up for teams who didn't play in conference tournament
   mutate(conf1 = if_else(is.na(conf1), 
-                  "Did Not Play in Conference Tournament",
-                  conf1)) %>%
+                         "Did Not Play in Conference Tournament", 
+                         conf1)) %>%
   #concatenate to conference performance
   mutate(
     conf_perf = if_else(
@@ -567,44 +575,105 @@ last_conf_game <- temp %>%
 
 
 #adding this variable to dataframe
-temp <- temp %>%
-  left_join(last_conf_game, by = c('team_id' = 'team_id', 'season' = 'season'))
+team_season_stats <- team_season_stats %>%
+  left_join(last_conf_game, by = c('team_id', 'season'))
 
 
-##### Players who Avg 15+ Minutes (aka "starters")
+# check to ensure no more exceptions needed
+# team_season_stats %>%
+#   ungroup() %>%
+#   filter(tourney_team_flag ==1) %>%
+#   group_by(conf_perf) %>%
+#   summarise(count = n()) %>%
+#   arrange(desc(count))
 
-#filter player data to desired timeframe and stats
+
+#Have to handle exclusions because there are issues with the data
+team_season_stats <- team_season_stats %>%
+  mutate(conf_perf = case_when(
+    # 2013 Exceptions & Typos
+    season == 2013 & team_id == 57  ~ "Final - L",        # Florida
+    season == 2013 & team_id == 139 ~ "Final - W",        # Saint Louis
+    season == 2013 & team_id == 145 ~ "Final - W",        # Ole Miss
+    season == 2013 & team_id == 153 ~ "Final - L",        # North Carolina
+    season == 2013 & team_id == 194 ~ "Final - W",        # Ohio State
+    season == 2013 & team_id == 275 ~ "Final - L",        # Wisconsin
+    season == 2013 & team_id == 2390 ~ "Final - W",       # Miami
+    season == 2013 & team_id == 2670 ~ "Final - L",       # VCU
+    
+    # 2012 Exceptions
+    season == 2012 & team_id == 52  ~ "Final - W",        # Florida State
+    season == 2012 & team_id == 96  ~ "Final - L",        # Kentucky
+    season == 2012 & team_id == 127 ~ "Final - W",        # Michigan State
+    season == 2012 & team_id == 153 ~ "Final - L",        # North Carolina
+    season == 2012 & team_id == 194 ~ "Final - L",        # Ohio State
+    season == 2012 & team_id == 179 ~ "Final - W",        # St. Bonaventure
+    season == 2012 & team_id == 238 ~ "Final - W",        # Vanderbilt
+    season == 2012 & team_id == 2752 ~ "Final - L",       # Xavier
+    
+    # 2008, 2010, 2011/2015, 2021 Exceptions
+    season == 2021 & team_id == 2305 ~ "Quarterfinals - L", # Kansas
+    season == 2021 & team_id == 258 ~ "Quarterfinals - L", # Virginia
+    season == 2015 & team_id == 108 ~ "Final - W", # Harvard
+    season == 2011 & team_id == 163 ~ "Final - W", # Princeton
+    season == 2010 & team_id == 96  ~ "Final - W",        # Kentucky
+    season == 2010 & team_id == 135 ~ "Final - L",        # Minnesota
+    season == 2010 & team_id == 194 ~ "Final - W",        # Ohio State
+    season == 2010 & team_id == 150 ~ "Final - W",        # Duke
+    season == 2010 & team_id == 59  ~ "Final - L",        # Georgia Tech
+    season == 2010 & team_id == 218 ~ "Final - W",        # Temple
+    season == 2010 & team_id == 257 ~ "Final - L",        # Richmond
+    season == 2008 & team_id == 252 ~ "Final - L",        # BYU
+    season == 2008 & team_id == 2439 ~ "Final - W",        # UNLV
+    
+    # Keep everything else the same
+    TRUE ~ conf_perf
+  ))
+
+
+
+####
+# Player Three Point Ability and Count of Starters
+####
+
+
+#get player stats and 2nd half
 players_filtered <- players %>%
-  inner_join(date_ranges, by = c('season' = 'year')) %>%
-  left_join(neutral_site_flag, by = c('game_id' = 'id', 'season' = 'season')) %>%
+  inner_join(date_ranges, by = 'season') %>%
+  left_join(neutral_site_flag, by = c('game_id' = 'id', 'season')) %>%
   #2nd half of season
-  filter(game_date.x >= start_date & game_date.x <= end_date) %>%
+  filter(game_date.x >= mid_date & game_date.x <= end_date) %>%
   #setting all neutral site games to away for both teams
   mutate(team_home_away = ifelse(neutral_site == TRUE, "away", home_away)) %>%
   group_by(season, team_id, athlete_id, team_home_away) %>%
   #grabbing season averages for these players. use na.rm = TRUE for players who didn't play
-  dplyr::summarise(games = n(),
-            games_played = sum(!is.na(minutes) & minutes >0),
+  dplyr::summarise(
+            games = n(),
+            games_played = sum(minutes >0, na.rm = TRUE),
             minutes_ = sum(minutes, na.rm = TRUE),
             three_point_made = sum(three_point_field_goals_made, na.rm = TRUE),
             three_point_att = sum(three_point_field_goals_attempted, na.rm = TRUE),
             mpg = minutes_/games_played,
-            three_point_clip = three_point_made/three_point_att)
+            three_point_clip = three_point_made/three_point_att,
+            three_pt_att_pg = three_point_att / games,
+            three_pt_att_pgp = three_point_att / games_played,
+            fouled_out_count = sum(fouls >= 5, na.rm = TRUE),
+            .groups = 'drop')
 
 
-#Logic to determine mpg for starters. I choose 15 because the median is 8 players for 15, but avg is less so I would prefer to include more than less
+#Logic to determine mpg for starters. I choose 14 because the median is 8 players, feels like a good number
 # MPG thresholds you want to evaluate
-# thresholds <- c(10, 12, 15, 18, 20, 25)
+# thresholds <- c(5, 8, 10, 12, 14,  15, 18)
 # 
 # median_players_by_threshold <- map_df(thresholds, function(t) {
-#   
+# 
 #   players_filtered %>%
-#     group_by(team_id, athlete_id) %>%
+#     group_by(season, team_id, athlete_id) %>%
 #     filter(any(mpg >= t)) %>%
-#     distinct(team_id, athlete_id) %>%
-#     group_by(team_id) %>%
+#     distinct(season, team_id, athlete_id) %>%
+#     group_by(season, team_id) %>%
 #     summarise(n_players = n(), .groups = "drop") %>%
-#     
+# 
 #     # get median across all teams
 #     summarise(
 #       mpg_threshold = t,
@@ -615,18 +684,20 @@ players_filtered <- players %>%
 # 
 # median_players_by_threshold
 
-#want players who have at least 15 minutes per game on the season @ home or away
-players_filtered <- players_filtered %>%
-  group_by(athlete_id) %>%
-  #the "any" argument counts both entries for someone who had 17 mpg at home and 12 mpg at away. 
-  filter(any(mpg >= 15)) %>%
-  ungroup()
 
-#want players who have played at least 3 Home, 3 Away games & at least 45 total min this season
-players_filtered <- players_filtered %>%
-  group_by(athlete_id) %>%
-  filter(all(games_played >= 3) & all(minutes_ >= 45)) %>% 
-  ungroup()
+*******
+****** THEN UPDATE the median_players_by_threshold FORMULA FOr home/away
+******** filter to three point attempts (2.5 per game? andy says 4.5)
+
+
+#determine 3pa
+
+starters <- players_filtered %>%
+  group_by(season, team_id, athlete_id) %>%
+  #want at least 14 mpg in home or away, and to have played at least 3 games & 45 min home, 3 games & 45 min away
+  filter(any(mpg >= 14), all(games_played >=3), all(minutes_ >=45)) %>%
+  ungroup() 
+
 
 #determine the cutoff for # of players attempting a 3 & exploring three point clip rate
 hist(players_filtered$three_point_clip)
