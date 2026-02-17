@@ -2,6 +2,7 @@
 # 1. check coach_lookup table for NA's in team_id col. Do you need to recode team names
 # 2. check coaches_final for exclusions to add (ie remove a coach for retiring or scandal)
 # 3. check conf_perf for teams that win any round other than Final
+# 4. Update womens teams in tourney for that year (check against https://www.sports-reference.com/cbb/seasons/women/2025-school-stats.html)
 # 4. Update years + tourney dates under Configuration & Helper Data
 
 library(hoopR)
@@ -40,7 +41,8 @@ date_ranges <- tibble(
   season = year(tourney_dates),
   start_date = as.Date(paste0(year(tourney_dates)-1, "-10-01")),
   mid_date = as.Date(paste0(year(tourney_dates), "-01-01")),
-  end_date = tourney_dates
+  end_date = tourney_dates,
+  end_of_tourney = as.Date(paste0(year(tourney_dates), "-05-01"))
 )
 
 
@@ -98,7 +100,7 @@ full_team_list_lookup <- team_game_info %>%
 
 
 ################################################################################
-### --- 4. Seniority & SMDI Metrics ---
+### --- 4. Seniority & SMDI Metrics & Team Spirit (Women's Teams in Tourney) ---
 ################################################################################
 
 
@@ -156,6 +158,81 @@ team_smdi <- players %>%
   summarise(smdi = 1 - (length(intersect(athlete_id[starter_rank <= 5], 
                                          athlete_id[minutes_rank <= 5])) / 5), 
             .groups = "drop")
+
+
+
+# Team Spirit - Did the women's team also make the tourney?
+
+womens_teams <- read.csv('womens_teams_matchup.csv')
+womens_teams <- womens_teams %>%
+  mutate(womens_team_tourney_flag = replace_na(womens_team_tourney_flag, 0)) %>%
+  select(-c(team_name))
+
+
+# March Madness Performance (Target variable)
+
+mm_perf <- team_game_info %>%
+  filter(tournament_id == 22) %>%
+  inner_join(date_ranges, by = 'season') %>%
+  #tourney only
+  filter(game_date >= end_date, game_date <= end_of_tourney) %>%
+  bind_rows(
+    select(., season, 
+           game_date, 
+           team_id = home_id, 
+           team_name = home_short_display_name,
+           team_win = home_winner, 
+           notes_headline),
+    select(., season, 
+           game_date, 
+           team_id = away_id, 
+           team_name = away_short_display_name,
+           team_win = away_winner, 
+           notes_headline)
+  ) %>%
+  drop_na(team_id) %>%
+  distinct(season, game_date, team_id, team_name, team_win, notes_headline)
+
+
+mm_perf <- mm_perf %>%
+  mutate(
+    tf = str_to_lower(notes_headline),
+    tourney_summary = case_when(
+      
+      str_detect(tf, "national championship") ~ "Final",
+      str_detect(tf, "final 4|final four")    ~ "F4",
+      str_detect(tf, "elite 8")               ~ "E8",
+      str_detect(tf, "sweet 16")              ~ "S16",
+      
+      # 2011–2015 special naming (data is weird)
+      season %in% 2011:2015 & str_detect(tf, "2nd rd|2nd round") ~ "R64",
+      season %in% 2011:2015 & str_detect(tf, "3rd rd|3rd round") ~ "R32",
+      season %in% 2011:2015 & str_detect(tf, "1st rd|1st round") ~ "First Four",
+      
+      # All other seasons (normal naming)
+      !season %in% 2011:2015 & str_detect(tf, "1st rd|1st round") ~ "R64",
+      !season %in% 2011:2015 & str_detect(tf, "2nd rd|2nd round") ~ "R32",
+      !season %in% 2011:2015 & str_detect(tf, "opening round|first four") ~ "First Four",
+      TRUE ~ "Other"
+    ),
+    tourney_summary = factor(
+      tourney_summary,
+      levels = c("First Four", "R64", "R32", "S16", "E8", "F4", "Final")
+    ), 
+    tourney_perf = paste(tourney_summary, if_else(team_win, "W", "L"), sep = " - ")
+  ) %>%
+  select(-tf) %>%
+  group_by(season, team_id) %>%
+  slice_max(order_by = game_date, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(season, team_id, tourney_summary, tourney_perf)
+
+
+# View(
+#   mm_perf %>%
+#     group_by(season, tourney_summary) %>%
+#     summarise(count = n())
+# )
 
 
 ################################################################################
@@ -413,7 +490,7 @@ stats_2ndhalf <- szn_stats %>%
   filter(game_date >= mid_date & game_date <= end_date) %>%
   inner_join(szn_stats, by = c('game_id', 'opponent_team_id' = 'team_id')) %>%
   left_join(team_game_info, by = c('game_id' = 'id', 'team_id' = 'home_id')) %>%
-  left_join(team_game_info, by =c('game_id' = 'id', 'team_id' = 'away_id')) %>%
+  left_join(team_game_info, by = c('game_id' = 'id', 'team_id' = 'away_id')) %>%
   #trimming the duplicated columns & setting all neutral site games to away for both teams
   mutate(neutral_site = coalesce(neutral_site.x, neutral_site.y),
          notes_headline = coalesce(notes_headline.x, notes_headline.y),
@@ -884,7 +961,7 @@ final_df_2H_away <- final_df_2H %>%
 
 
 ################################################################################
-### --- 6. Split data in to 1st half only ---
+### --- 8. Split data in to 1st half only ---
 ################################################################################
 
 
@@ -998,7 +1075,7 @@ team_season_stats_1H <- stats_1sthalf %>%
 
 
 ################################################################################
-### --- 7. Additional Vars for 1st Half ---
+### --- 9. Additional Vars for 1st Half ---
 ################################################################################
 
 
@@ -1232,101 +1309,77 @@ final_df_1H <- team_season_stats_1H %>%
 
 
 ################################################################################
-### --- 8. Finalize dataframes for both 1H and 2H(Home), 2H(Away) ---
+### --- 10. Finalize dataframes for both 1H and 2H(Home), 2H(Away) ---
 ################################################################################
 
 
-final_df_1H #1st half total stats
+##Note: final_df_1H has 1 less observation b/c of 2021 Colgate
+#They did not play until January 2nd in 2021 due to COVID
 
-final_df_2H_home #2nd half home stats
-final_df_2H_away #2nd half away stats
+#Function to apply weights
+apply_weights <- function(df, weight) {
+  exclude_cols <- c("season", "team_id", "tourney_team_flag", "games", "wins", "total_points", "total_opp_points")
+  
+  df %>%
+    mutate(across(
+      where(is.numeric) & !any_of(exclude_cols), 
+      ~ .x * weight
+    ))
+}
 
-#weights to decide on: 1h/2ha/2hh
-#1. [ ]0.1/0.5/0.4
-#2. [ ]0.1/0.6/0.3
-#3. [ ]0.1/0.7/0.2
-#4. [ ]0.1/0.8/0.1
+#weights to decide on: 1h/2hh/2ha
+#1. [ ]0.1/0.4/0.5
+#2. [ ]0.1/0.3/0.6
+#3. [ ]0.1/0.2/0.7
+#4. [ ]0.1/0.1/0.8
 #5. [ ]0.2/0.4/0.4
-#6. [ ]0.2/0.5/0.3
-#7. [ ]0.2/0.6/0.2
-#8. [ ]0.3/0.4/0.3
+#6. [ ]0.2/0.3/0.5
+#7. [ ]0.2/0.2/0.6
+#8. [ ]0.3/0.3/0.4
 
-#Choose weight scheme
 weight_1h <- 0.1
-weight_2ha <- 0.5
 weight_2hh <- 0.4
+weight_2ha <- 0.5
 
-#weight 2nd half home
-aa <- final_df_2H_home %>%
-   mutate(
-     across(
-       where(is.numeric) & !c(tourney_team_flag, games, wins, total_points, total_opp_points), 
-       ~ .x * weight_2hh
-     )
-   )
-
-#weight 2nd half away
-bb <- final_df_2H_away %>%
-  mutate(
-    across(
-      where(is.numeric) & !c(tourney_team_flag, games, wins, total_points, total_opp_points), 
-      ~ .x * weight_2ha
-    )
-  )
-#weight 1st half
-cc <- final_df_1H %>%
-  mutate(
-    across(
-      where(is.numeric) & !c(tourney_team_flag, games, wins, total_points, total_opp_points), 
-      ~ .x * weight_1h
-    )
-  )
-
-#Map conference perf to 1st half DF b/c I did not include it originally, need it to bind rows
-conf_perf_map <- bind_rows(final_df_home, final_df_away) %>%
-  ungroup() %>% 
-  select(season, team_id, conf_perf) %>%
-  distinct()
-
-#Joining in the conf performance map
-df_first_half_fixed <- cc %>%
-  left_join(conf_perf_map, by = c("season", "team_id"))
-
-#Joins 1st half, 2nd half home/away & sums all values; creates weighted dataframe
-weighted_df <- bind_rows(aa, bb, df_first_half_fixed) %>%
-  group_by(season, team_id, team_name, tourney_team_flag, conf_perf) %>%
+#Creates weighted df
+weighted_df <- list(
+  final_df_1H        %>% apply_weights(weight_1h),
+  final_df_2H_home   %>% apply_weights(weight_2hh),
+  final_df_2H_away   %>% apply_weights(weight_2ha)
+) %>%
+  bind_rows() %>%
+  # fills in conf perf since it isn't included on 1H dataframe
+  group_by(season, team_id) %>% 
+  fill(conf_perf, .direction = "downup") %>%
+  #now group by correctly
+  group_by(season, team_id, team_name, conf_perf) %>%
   summarise(
-    across(where(is.numeric), \(x) sum(x, na.rm = TRUE)), 
+    across(where(is.numeric), ~ sum(.x, na.rm = TRUE)), 
     .groups = "drop"
-  ) %>%
-  filter(tourney_team_flag ==1)
+  ) 
 
-
-#player_exp_lookup, team_smdi, coach_lookup
+# Final df for model
 chocolate_milk <- weighted_df %>%
-  left_join(select(coach_lookup, -coach, -school), by = c('team_id' = 'team_id', 'season' = 'year')) %>%
+  left_join(select(coach_lookup, -coach, -school), by = c('team_id', 'season' = 'year')) %>%
   left_join(player_exp_lookup, by = c("season", "team_id")) %>%
-  left_join(team_rotation_metrics, by = c("season", "team_id")) %>%
+  left_join(team_smdi, by = c("season", "team_id")) %>%
+  left_join(womens_teams, by = c("season", "team_id")) %>%
+  left_join(mm_perf, by = c("season", "team_id")) %>%
   #create pythagorean exp & wlPct AFTER weighting since I don't want to weight these
-  mutate(wlpct = wins/ games,
-         pyth_exp = total_points^11/(total_points^11 + total_opp_points^11),
-         luck = pyth_exp - wlpct) %>%
-  #drop variables that are not needed for final model
-  select(-wins_close, -count_close, -starters, 
-         -three_point_shooters, -threes35, -tourney_team_flag,
-         -wins, -total_points, -total_opp_points, -games)
+  mutate(
+    wlpct    = wins / games,
+    pyth_exp = total_points^11 / (total_points^11 + total_opp_points^11),
+    luck     = pyth_exp - wlpct
+  ) %>%
+  # Drop non-model variables
+  select(-c(games, wins, tourney_team_flag,
+            total_points, total_opp_points))
 
+
+write.csv(chocolate_milk, "final_df.csv")
 
 ####################################################################################
-have chatgpt review your code, clean it up if necessary, & then loop 2008:2025 to create full df
->> up to line 690 now (before 2nd H split)
->> you made date_ranges 1 table (start, mid, and end date)
-
-add MOV variable.....surprised this doesnt alr exist
-+ wlpct, tourney perf, and womens team in tourney (aka school spirit)
-
-write up documentation for variables
+duke is my pick to win
 
 
-THEN: make a model that is extremely simple. basically copy anthony klemm's project
->> take 3 inputs to decide: your model, simple model, and chalk / coin flip?
+
