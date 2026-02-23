@@ -18,6 +18,7 @@ library(httr)
 library(httr2)
 library(janitor)
 library(data.table)
+library(pROC)
 
 #############################################################################
 # --- 1. Configuration & Helper Data ---
@@ -751,8 +752,7 @@ players_filtered <- players %>%
             minutes_ = sum(minutes, na.rm = TRUE),
             three_point_made = sum(three_point_field_goals_made, na.rm = TRUE),
             three_point_att = sum(three_point_field_goals_attempted, na.rm = TRUE),
-            
-            weighted_minutes = (games_played/games)*minutes_,
+            weighted_minutes = ifelse(games_played == games, 0, minutes_),
             mpg = minutes_/games_played,
             three_point_clip = three_point_made/three_point_att,
             three_pt_att_pg = three_point_att / games,
@@ -915,7 +915,7 @@ final_df_2H <- team_season_stats_2H %>%
          games, wins,  total_points, total_opp_points,
          fgpct, threeptpct, ftpct, treb, oreb, dreb, ast, stl, blk, to, pers_fouls, 
          ppg, opp_ppg, opp_fgpct, opp_threeptpct, efgpct, mov, pace, unadj_off_eff, unadj_def_eff,
-         starters_shooting_threes_pct, three_pt_shooters_at_35pct_pct,
+         starters, starters_shooting_threes_pct, three_pt_shooters_at_35pct_pct,
          extraScoreChances, oppTO_teamTO_ratio, ast_TO_ratio, foul_outs, 
          adj_bayes_win_rate_close, close_pct, blowout_pct,
          healthy_rate, pct_guards, kill_shot_count) %>%
@@ -1143,8 +1143,7 @@ players_filtered_1H <- players %>%
     minutes_ = sum(minutes, na.rm = TRUE),
     three_point_made = sum(three_point_field_goals_made, na.rm = TRUE),
     three_point_att = sum(three_point_field_goals_attempted, na.rm = TRUE),
-    
-    weighted_minutes = (games_played/games)*minutes_,
+    weighted_minutes = ifelse(games_played == games, 0, minutes_),
     mpg = minutes_/games_played,
     three_point_clip = three_point_made/three_point_att,
     three_pt_att_pg = three_point_att / games,
@@ -1297,7 +1296,7 @@ final_df_1H <- team_season_stats_1H %>%
          games, wins,  total_points, total_opp_points,
          fgpct, threeptpct, ftpct, treb, oreb, dreb, ast, stl, blk, to, pers_fouls, 
          ppg, opp_ppg, opp_fgpct, opp_threeptpct, efgpct, mov, pace, unadj_off_eff, unadj_def_eff,
-         starters_shooting_threes_pct, three_pt_shooters_at_35pct_pct,
+         starters, starters_shooting_threes_pct, three_pt_shooters_at_35pct_pct,
          extraScoreChances, oppTO_teamTO_ratio, ast_TO_ratio, foul_outs, 
          adj_bayes_win_rate_close, close_pct, blowout_pct,
          healthy_rate, pct_guards, kill_shot_count) %>%
@@ -1328,14 +1327,14 @@ apply_weights <- function(df, weight) {
 }
 
 #weights to decide on: 1h/2hh/2ha
-#1. [ ]0.1/0.4/0.5
-#2. [ ]0.1/0.3/0.6
-#3. [ ]0.1/0.2/0.7
-#4. [ ]0.1/0.1/0.8
-#5. [ ]0.2/0.4/0.4
-#6. [ ]0.2/0.3/0.5
-#7. [ ]0.2/0.2/0.6
-#8. [ ]0.3/0.3/0.4
+#1. 0.1/0.4/0.5
+#2. 0.1/0.3/0.6
+#3. 0.1/0.2/0.7
+#4. 0.1/0.1/0.8
+#5. 0.2/0.4/0.4
+#6. 0.2/0.3/0.5
+#7. 0.2/0.2/0.6
+#8. 0.3/0.3/0.4
 
 weight_1h <- 0.1
 weight_2hh <- 0.4
@@ -1368,8 +1367,10 @@ chocolate_milk <- weighted_df %>%
   #create pythagorean exp & wlPct AFTER weighting since I don't want to weight these
   mutate(
     wlpct    = wins / games,
-    pyth_exp = total_points^11 / (total_points^11 + total_opp_points^11),
-    luck     = pyth_exp - wlpct
+    pyth_exp = total_points^8.6 / (total_points^8.6 + total_opp_points^8.6),
+    luck     = pyth_exp - wlpct,
+    deep_run = if_else(tourney_summary %in% 
+                         c("Final", "F4", "E8", "S16"), 1, 0)
   ) %>%
   # Drop non-model variables
   select(-c(games, wins, tourney_team_flag,
@@ -1378,8 +1379,18 @@ chocolate_milk <- weighted_df %>%
 
 write.csv(chocolate_milk, "final_df.csv")
 
-####################################################################################
-duke is my pick to win
+
+
+# Every Tournament Matchup
+
+matchups <- team_game_info %>%
+  filter(tournament_id == 22) %>%
+  inner_join(date_ranges, by = 'season') %>%
+  #tourney only
+  filter(game_date >= end_date, game_date <= end_of_tourney) %>%
+  distinct(season, game_date, home_id, home_short_display_name, home_winner,
+                away_id, away_short_display_name, away_winner)
 
 
 
+write.csv(matchups, "matchups.csv")
