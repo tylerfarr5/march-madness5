@@ -1,9 +1,11 @@
 #Note for code updates each year:
-# 1. check coach_lookup table for NA's in team_id col. Do you need to recode team names
-# 2. check coaches_final for exclusions to add (ie remove a coach for retiring or scandal)
-# 3. check conf_perf for teams that win any round other than Final
-# 4. Update womens teams in tourney for that year (check against https://www.sports-reference.com/cbb/seasons/women/2025-school-stats.html)
-# 4. Update years + tourney dates under Configuration & Helper Data
+# 1. Update years + tourney dates under Configuration & Helper Data
+# 2. check coach_lookup table for NA's in team_id col. Do you need to recode team names?
+# 3. check coaches_final for exclusions to add (ie remove a coach for retiring or scandal)
+# 4. check conf_perf for teams that win any round other than Final
+# 5. Update womens teams in tourney for that year (check against https://www.sports-reference.com/cbb/seasons/women/2025-school-stats.html)
+# 6. Update power_conf in tourney that year. Also confirm no teams joined/left big10,sec,acc,big12,bigeast ('power conf')
+# 7. bart torvik CSV - pull 1H and 2H of year, then confirm no team ID's missing from bart_torvik dataset
 
 library(hoopR)
 library(dplyr)
@@ -19,14 +21,15 @@ library(httr2)
 library(janitor)
 library(data.table)
 library(pROC)
+library(readxl)
 
 #############################################################################
 # --- 1. Configuration & Helper Data ---
 #############################################################################
 
 #Pulling all tournament teams since 2008 (EXCLUDE 2020)
-years <- setdiff(2008:2025, 2020)
-player_exp_years_lookup <- setdiff(2003:2025, 2020)
+years <- setdiff(2008:2026, 2020)
+player_exp_years_lookup <- setdiff(2003:2026, 2020)
 
 #all tourney dates the *Monday* before tourney starts
 #Data goes back to 2008, but I go back to 2003 for a player experience variable
@@ -34,7 +37,7 @@ tourney_dates <- as.Date(c("2003-03-17", "2004-03-15", "2005-03-14","2006-03-13"
                             "2008-03-17", "2009-03-16","2010-03-15", "2011-03-14", 
                            "2012-03-12", "2013-03-18", "2014-03-17","2015-03-16", "2016-03-14",
                            "2017-03-13", "2018-03-12", "2019-03-18","2021-03-15", "2022-03-14", 
-                           "2023-03-13", "2024-03-18", "2025-03-17"))
+                           "2023-03-13", "2024-03-18", "2025-03-17", "2026-03-16"))
 
 # create a lookup table with start and end dates per year
 #want Jan 1 - start of MM tourney. this is the 2nd half of the season
@@ -72,7 +75,7 @@ pbp <- map(years, function(x) {
 
 #need a neutral site flag for these games
 neutral_site_flag <- team_game_info %>%
-  select(id, game_date, season, neutral_site)
+  dplyr::select(id, game_date, season, neutral_site)
 
 
 
@@ -84,8 +87,8 @@ neutral_site_flag <- team_game_info %>%
 tourney_teams <- team_game_info %>%
   filter(tournament_id == 22) %>%
   bind_rows(
-    select(., season, team_id = home_id, team_name = home_short_display_name),
-    select(., season, team_id = away_id, team_name = away_short_display_name)
+    dplyr::select(., season, team_id = home_id, team_name = home_short_display_name),
+    dplyr::select(., season, team_id = away_id, team_name = away_short_display_name)
   ) %>%
   drop_na(team_id) %>%
   distinct(season, team_id, team_name) 
@@ -93,8 +96,8 @@ tourney_teams <- team_game_info %>%
 #all teams
 full_team_list_lookup <- team_game_info %>%
   bind_rows(
-    select(., team_id = home_id, team_name = home_location, season),
-    select(., team_id = away_id, team_name = away_location, season)
+    dplyr::select(., team_id = home_id, team_name = home_location, season),
+    dplyr::select(., team_id = away_id, team_name = away_location, season)
   ) %>%
   drop_na(team_id) %>%
   distinct(season, team_id, team_name)
@@ -167,7 +170,14 @@ team_smdi <- players %>%
 womens_teams <- read.csv('womens_teams_matchup.csv')
 womens_teams <- womens_teams %>%
   mutate(womens_team_tourney_flag = replace_na(womens_team_tourney_flag, 0)) %>%
-  select(-c(team_name))
+  dplyr::select(-c(team_name))
+
+
+# Power Conference - does the conference impact tournament performance?
+
+power_conf <- read_excel("power_conf.xlsx")
+power_conf <- power_conf %>%
+  dplyr::select(-c(team_name))
 
 
 # March Madness Performance (Target variable)
@@ -178,13 +188,13 @@ mm_perf <- team_game_info %>%
   #tourney only
   filter(game_date >= end_date, game_date <= end_of_tourney) %>%
   bind_rows(
-    select(., season, 
+    dplyr::select(., season, 
            game_date, 
            team_id = home_id, 
            team_name = home_short_display_name,
            team_win = home_winner, 
            notes_headline),
-    select(., season, 
+    dplyr::select(., season, 
            game_date, 
            team_id = away_id, 
            team_name = away_short_display_name,
@@ -222,11 +232,11 @@ mm_perf <- mm_perf %>%
     ), 
     tourney_perf = paste(tourney_summary, if_else(team_win, "W", "L"), sep = " - ")
   ) %>%
-  select(-tf) %>%
+  dplyr::select(-tf) %>%
   group_by(season, team_id) %>%
   slice_max(order_by = game_date, n = 1, with_ties = FALSE) %>%
   ungroup() %>%
-  select(season, team_id, tourney_summary, tourney_perf)
+  dplyr::select(season, team_id, tourney_summary, tourney_perf)
 
 
 # View(
@@ -234,6 +244,60 @@ mm_perf <- mm_perf %>%
 #     group_by(season, tourney_summary) %>%
 #     summarise(count = n())
 # )
+
+
+
+## Bart Torvik Variables - weight 70% 2H, 30% 1H
+#Pulling AdjOE, AdjDE, BARTHAG, and WAB in to model
+
+# get all files
+files <- list.files("~/Data Science/MM Project", pattern = "BartTorvik_\\d{4}_[12]H\\.csv$", full.names = TRUE)
+bart_torvik_id_lookup <- read_csv("bart_torvik_id_lookup.csv", show_col_types = FALSE, col_names = TRUE)
+
+# function to process a single file
+process_file <- function(file) {
+  df <- read_csv(file, show_col_types = FALSE, col_names = FALSE)
+  
+  # keep first 4 cols + 3rd from last
+  df <- df %>%
+    dplyr::select(1:4, ncol(.) - 2)
+  
+  # extract metadata from filename
+  file_info <- str_match(basename(file), "BartTorvik_(\\d{4})_([12]H)")
+  
+  df %>%
+    mutate(
+      season = as.integer(file_info[2]),
+      half   = file_info[3]
+    )
+}
+
+# read and stack all files
+all_data <- map_dfr(files, process_file)
+
+bt_num_cols <- all_data %>%
+  dplyr::select(-X1, -season, -half) %>%
+  dplyr::select(where(is.numeric)) %>%
+  names()
+
+# pivot + weight
+bart_torvik <- all_data %>%
+  mutate(weight = if_else(half == "2H", 0.5, 0.5)) %>%
+  group_by(X1, season, half) %>%
+  summarise(
+    across(
+      all_of(bt_num_cols),
+      ~ sum(.x * weight, na.rm = TRUE),
+      .names = "{.col}"
+    ),
+    .groups = "drop"
+  ) %>%
+  group_by(X1, season) %>%
+  summarise(AdjOE = sum(X2),
+            AdjDE = sum(X3),
+            BARTHAG = sum(X4),
+            WAB = sum(X35)) %>%
+  left_join(bart_torvik_id_lookup, by = "X1")
 
 
 ################################################################################
@@ -270,12 +334,13 @@ raw_coaches <- map_dfr(years, scrape_coaches_season)
 
 
 # *** Data cleanup to fix tourney teams that had multiple coaches in season
-#ie: Indiana HC Kelvin Sampson stepped down midseason for recruiting violations
+#ie: Indiana HC Kelvin Sampson stepped down midseason for recruiting violations. I want the coach who coached in the tournament.
 
 #Coaches to remove:
 #2008 Indiana Kelvin Sampson
 #2012 Western Kentucky Ken McDonald
 #2016 Wisconsin Bo Ryan
+#2016 Syracuse Mike Hopkins (filled in for Boeheim suspension)
 #2019 LSU Will Wade
 #2022 LSU Will Wade
 #2023 Kansas Bil Self
@@ -283,7 +348,7 @@ raw_coaches <- map_dfr(years, scrape_coaches_season)
 #2024 McNeese State Vernon Hamilton
 #2024 McNeese State Brandon Chambers
 
-#Here is a check to see if there are more coaches to remove
+#Here is a check to see if there are more coaches to remove. Should be blank
 # coaches_final %>%
 #   filter(tourney_perf != "") %>%
 #   group_by (year, school) %>%
@@ -292,16 +357,16 @@ raw_coaches <- map_dfr(years, scrape_coaches_season)
 
 
 exclusions <- tibble(
-  coach = c("Kelvin Sampson", "Ken McDonald", "Bo Ryan", "Will Wade", "Will Wade", "Bill Self", "Chris Beard", "Vernon Hamilton", "Brandon Chambers"),
-  school = c("Indiana", "Western Kentucky", "Wisconsin", "LSU", "LSU", "Kansas", "Texas", "McNeese State", "McNeese State"),
-  year = c(2008, 2012, 2016, 2019, 2022, 2023, 2023, 2024, 2024)
+  coach = c("Kelvin Sampson", "Ken McDonald", "Bo Ryan", "Mike Hopkins", "Will Wade", "Will Wade", "Bill Self", "Chris Beard", "Vernon Hamilton", "Brandon Chambers"),
+  school = c("Indiana", "Western Kentucky", "Wisconsin", "Syracuse", "LSU", "LSU", "Kansas", "Texas", "McNeese State", "McNeese State"),
+  year = c(2008, 2012, 2016, 2016, 2019, 2022, 2023, 2023, 2024, 2024)
 )
 
 
 coaches_final <- raw_coaches %>%
   # Filter out the sub-header rows found in the middle of the table
   filter(!str_detect(x, "Coach") & x != "") %>%
-  select(
+  dplyr::select(
     coach = x, school = x_2, year,
     current_w = season, current_l = season_2, tourney_perf = season_6,
     #win/loss does not consider W/L of current season. it is the coach performance for all seasons prior
@@ -326,12 +391,49 @@ coaches_final <- raw_coaches %>%
   mutate(coach = str_remove(coach, " \\*")) %>%
   # Convert numeric columns back to numbers
   mutate(across(c(year, starts_with("curr"), starts_with("career")), parse_number)) %>%
-  filter(tourney_perf != "") %>%
+  #filter(tourney_perf != "") %>%
   anti_join(exclusions, by = c("coach", "school", "year"))
+
+
+coaches_final <- coaches_final %>%
+  mutate(school = dplyr::recode(
+    school,
+    "Albany (NY)" = "Albany",
+    "American" = "American University",
+    "College of Charleston" = "Charleston",
+    "ETSU" = "East Tennessee State",
+    "FDU" = "Fairleigh Dickinson",
+    "Hawaii" = "Hawai'i",
+    "LIU" = "Long Island University",
+    "Long Beach State" = "Long Beach State",
+    "Loyola (IL)" = "Loyola Chicago",
+    "Loyola (MD)" = "Loyola Maryland",
+    "New Orleans" = "Loyola New Orleans",
+    "McNeese State" = "McNeese",
+    "Miami (FL)" = "Miami",
+    "Penn" = "Pennsylvania",
+    "Pitt" = "Pittsburgh",
+    "Prairie View" = "Prairie View A&M",
+    "Saint Francis (PA)" = "Saint Francis",
+    "SIU-Edwardsville" = "SIU Edwardsville",
+    "St. John's (NY)" = "St. John's",
+    "St. Joseph's" = "Saint Joseph's",
+    "St. Peter's" = "Saint Peter's",
+    "UC-Davis" = "UC Davis",
+    "UC-Irvine" = "UC Irvine",
+    "UC-San Diego" = "UC San Diego",
+    "UCSB" = "UC Santa Barbara",
+    "UNC" = "North Carolina",
+    "Queens (NC)" = "Queens University",
+    .default = school
+  )) %>%
+  left_join(full_team_list_lookup, by = c('school' = 'team_name', 'year' = 'season')) %>%
+  left_join(tourney_teams, by = c('year' = 'season', 'team_id'))
 
 
 
 coaches_final <- coaches_final %>%
+  filter(!is.na(team_name)) %>%
   #builds out variables for coach
   mutate(adj_curr_school_career_w = curr_school_career_w - current_w, #total wins - current season wins. can't count current szn since it uses tourney perf
          adj_curr_school_career_l = curr_school_career_l - current_l, #total losses - current season losses. can't count current szn since it uses tourney perf
@@ -431,11 +533,12 @@ coaches_final <- coaches_final %>%
   
   ungroup() %>%
   
-  select(coach, school, year,
+  dplyr::select(coach, school, year,
          coach_career_adj_win_pct, 
          coach_career_log_games_total,
          coach_career_adj_march_eff,
-         coach_curr_school_march_eff)
+         coach_curr_school_march_eff,
+         team_id)
 # adj_win_pct, #baseline, win percent over career
 # log_games_total, #total career games coached... how much basketball have they seen?
 # adj_march_eff, #weight of lifetime success in  MM tourney * log_games_total
@@ -444,39 +547,7 @@ coaches_final <- coaches_final %>%
 
 
 #Final coach table Lookup
-coach_lookup <- coaches_final %>%
-  mutate(school = recode(
-    school,
-    "Albany (NY)" = "Albany",
-    "American" = "American University",
-    "College of Charleston" = "Charleston",
-    "ETSU" = "East Tennessee State",
-    "FDU" = "Fairleigh Dickinson",
-    "Hawaii" = "Hawai'i",
-    "LIU" = "Long Island University",
-    "Long Beach State" = "Long Beach State",
-    "Loyola (IL)" = "Loyola Chicago",
-    "Loyola (MD)" = "Loyola Maryland",
-    "New Orleans" = "Loyola New Orleans",
-    "McNeese State" = "McNeese",
-    "Miami (FL)" = "Miami",
-    "Penn" = "Pennsylvania",
-    "Pitt" = "Pittsburgh",
-    "Prairie View" = "Prairie View A&M",
-    "Saint Francis (PA)" = "Saint Francis",
-    "SIU-Edwardsville" = "SIU Edwardsville",
-    "St. John's (NY)" = "St. John's",
-    "St. Joseph's" = "Saint Joseph's",
-    "St. Peter's" = "Saint Peter's",
-    "UC-Davis" = "UC Davis",
-    "UC-Irvine" = "UC Irvine",
-    "UC-San Diego" = "UC San Diego",
-    "UCSB" = "UC Santa Barbara",
-    "UNC" = "North Carolina",
-    .default = school
-  )) %>%
-  left_join(full_team_list_lookup, by = c('school' = 'team_name', 'year' = 'season'))
-
+coach_lookup <- coaches_final 
 
 
 ################################################################################
@@ -498,7 +569,7 @@ stats_2ndhalf <- szn_stats %>%
          team_home_away = ifelse(neutral_site == TRUE, "away", team_home_away.x),
          tournament_id = coalesce(tournament_id.x, tournament_id.y)) %>%
   #selecting desired columns
-  select(
+  dplyr::select(
     # game / team info
     game_id, season = season.x, game_date = game_date.x,
     team_id,
@@ -581,7 +652,7 @@ team_season_stats_2H <- stats_2ndhalf %>%
   ) %>% #only want tourney teams; creates flag to find them
   left_join(tourney_teams, by = c('season', 'team_id')) %>%
   mutate(tourney_team_flag = ifelse(!is.na(team_name.y),1,0)) %>%
-  select(-team_name.y) %>%
+  dplyr::select(-team_name.y) %>%
   rename(team_name = team_name.x)
 
 
@@ -621,7 +692,7 @@ team_season_stats_2H <- team_season_stats_2H %>%
     adj_bayes_win_rate_close = (wins_close + alpha) / (count_close + alpha + beta)
   ) %>%
   # Clean up temporary prior columns
-  select(-mu, -var, -alpha, -beta)
+  dplyr::select(-mu, -var, -alpha, -beta)
 
 
 
@@ -665,7 +736,7 @@ last_conf_game <- team_season_stats_2H %>%
         paste(conf1, if_else(team_winner, "W", "L"), sep = " - ")
     )
   ) %>%
-  select(season, team_id, conf_perf) 
+  dplyr::select(season, team_id, conf_perf) 
 
 
 #adding this variable to dataframe
@@ -819,7 +890,7 @@ starters_agg <- starters %>%
             healthy_rate = sum(weighted_minutes, na.rm = TRUE)/sum(minutes_, na.rm = TRUE)) %>%
   mutate(three_pt_shooters_at_35pct_pct = threes35 / three_point_shooters,
          starters_shooting_threes_pct = three_point_shooters / starters) %>%
-  select(-three_point_shooters, -threes35)
+  dplyr::select(-three_point_shooters, -threes35)
 
 
 #data check - confirms no mismatch b/w home & away for starters by team
@@ -845,7 +916,7 @@ guard_pct <- starters %>%
     pct_guards = guards / starters,
     .groups = "drop"
   ) %>%
-  select(season, team_id, team_home_away, pct_guards)
+  dplyr::select(season, team_id, team_home_away, pct_guards)
 
 #joining player position (% guards) to main df
 team_season_stats_2H <- team_season_stats_2H %>%
@@ -910,7 +981,7 @@ team_season_stats_2H <- team_season_stats_2H %>%
 
 #Final DF for 2nd half of season stats
 final_df_2H <- team_season_stats_2H %>%
-  select(season, team_id, team_name, team_home_away, tourney_team_flag, 
+  dplyr::select(season, team_id, team_name, team_home_away, tourney_team_flag, 
          conf_perf, 
          games, wins,  total_points, total_opp_points,
          fgpct, threeptpct, ftpct, treb, oreb, dreb, ast, stl, blk, to, pers_fouls, 
@@ -987,7 +1058,7 @@ stats_1sthalf <- szn_stats %>%
          team_home_away = ifelse(neutral_site == TRUE, "away", team_home_away.x),
          tournament_id = coalesce(tournament_id.x, tournament_id.y)) %>%
   #selecting desired columns
-  select(
+  dplyr::select(
     # game / team info
     game_id, season = season.x, game_date = game_date.x,
     team_id,
@@ -1070,7 +1141,7 @@ team_season_stats_1H <- stats_1sthalf %>%
   ) %>% #only want tourney teams; creates flag to find them
   left_join(tourney_teams, by = c('season', 'team_id')) %>%
   mutate(tourney_team_flag = ifelse(!is.na(team_name.y),1,0)) %>%
-  select(-team_name.y) %>%
+  dplyr::select(-team_name.y) %>%
   rename(team_name = team_name.x)
 
 
@@ -1112,7 +1183,7 @@ team_season_stats_1H <- team_season_stats_1H %>%
     adj_bayes_win_rate_close = (wins_close + alpha) / (count_close + alpha + beta)
   ) %>%
   # Clean up temporary prior columns
-  select(-mu, -var, -alpha, -beta)
+  dplyr::select(-mu, -var, -alpha, -beta)
 
 
 
@@ -1208,7 +1279,7 @@ starters_agg_1H <- starters_1H %>%
             healthy_rate = sum(weighted_minutes, na.rm = TRUE)/sum(minutes_, na.rm = TRUE)) %>%
   mutate(three_pt_shooters_at_35pct_pct = threes35 / three_point_shooters,
          starters_shooting_threes_pct = three_point_shooters / starters) %>%
-  select(-three_point_shooters, -threes35)
+  dplyr::select(-three_point_shooters, -threes35)
 
 
 #data check - confirms no mismatch b/w home & away for starters by team
@@ -1234,7 +1305,7 @@ guard_pct <- starters_1H %>%
     pct_guards = guards / starters,
     .groups = "drop"
   ) %>%
-  select(season, team_id, pct_guards)
+  dplyr::select(season, team_id, pct_guards)
 
 #joining player position (% guards) to main df
 team_season_stats_1H <- team_season_stats_1H %>%
@@ -1292,7 +1363,7 @@ team_season_stats_1H <- team_season_stats_1H %>%
 
 #Final DF for 1st half of season stats
 final_df_1H <- team_season_stats_1H %>%
-  select(season, team_id, team_name, tourney_team_flag, 
+  dplyr::select(season, team_id, team_name, tourney_team_flag, 
          games, wins,  total_points, total_opp_points,
          fgpct, threeptpct, ftpct, treb, oreb, dreb, ast, stl, blk, to, pers_fouls, 
          ppg, opp_ppg, opp_fgpct, opp_threeptpct, efgpct, mov, pace, unadj_off_eff, unadj_def_eff,
@@ -1336,9 +1407,11 @@ apply_weights <- function(df, weight) {
 #7. 0.2/0.2/0.6
 #8. 0.3/0.3/0.4
 
-weight_1h <- 0.1
-weight_2hh <- 0.4
-weight_2ha <- 0.5
+#0.3, 0.3, 0.4 - best
+#0.5, 0.3, 0.2 - weird but best
+weight_1h <- 0.5 #0.5
+weight_2hh <- 0.3 #0.3
+weight_2ha <- 0.2 #0.2
 
 #Creates weighted df
 weighted_df <- list(
@@ -1359,10 +1432,12 @@ weighted_df <- list(
 
 # Final df for model
 chocolate_milk <- weighted_df %>%
-  left_join(select(coach_lookup, -coach, -school), by = c('team_id', 'season' = 'year')) %>%
+  left_join(dplyr::select(coach_lookup, -coach, -school), by = c('team_id', 'season' = 'year')) %>%
   left_join(player_exp_lookup, by = c("season", "team_id")) %>%
   left_join(team_smdi, by = c("season", "team_id")) %>%
   left_join(womens_teams, by = c("season", "team_id")) %>%
+  left_join(power_conf, by = c("season", "team_id")) %>%
+  left_join(bart_torvik, by = c("season", "team_id" = "Team ID")) %>%
   left_join(mm_perf, by = c("season", "team_id")) %>%
   #create pythagorean exp & wlPct AFTER weighting since I don't want to weight these
   mutate(
@@ -1370,14 +1445,15 @@ chocolate_milk <- weighted_df %>%
     pyth_exp = total_points^8.6 / (total_points^8.6 + total_opp_points^8.6),
     luck     = pyth_exp - wlpct,
     deep_run = if_else(tourney_summary %in% 
-                         c("Final", "F4", "E8", "S16"), 1, 0)
+                         c("Final", "F4", "E8"), 1, 0)
   ) %>%
   # Drop non-model variables
-  select(-c(games, wins, tourney_team_flag,
-            total_points, total_opp_points))
+  dplyr::select(-c(games, wins, tourney_team_flag,
+            total_points, total_opp_points, X1))
 
 
-write.csv(chocolate_milk, "final_df.csv")
+#write.csv(chocolate_milk, "final_df_2HA_favor.csv")
+write.csv(chocolate_milk, "final_df_no_bounds.csv")
 
 
 
@@ -1394,3 +1470,61 @@ matchups <- team_game_info %>%
 
 
 write.csv(matchups, "matchups.csv")
+
+# 
+# df_1st <- final_df_1H %>%
+#   left_join(dplyr::select(coach_lookup, -coach, -school), by = c('team_id', 'season' = 'year')) %>%
+#   left_join(player_exp_lookup, by = c("season", "team_id")) %>%
+#   left_join(team_smdi, by = c("season", "team_id")) %>%
+#   left_join(womens_teams, by = c("season", "team_id")) %>%
+#   left_join(power_conf, by = c("season", "team_id")) %>%
+#   left_join(bart_torvik, by = c("season", "team_id" = "Team ID")) %>%
+#   left_join(mm_perf, by = c("season", "team_id")) %>%
+#   #create pythagorean exp & wlPct AFTER weighting since I don't want to weight these
+#   mutate(
+#     deep_run = if_else(tourney_summary %in%
+#                          c("Final", "F4", "E8"), 1, 0)
+#   ) %>%
+#   # Drop non-model variables
+#   dplyr::select(-c(games, wins, tourney_team_flag,
+#             total_points, total_opp_points, X1))
+# 
+# 
+# df_2nd_home <- final_df_2H_home %>%
+#   left_join(dplyr::select(coach_lookup, -coach, -school), by = c('team_id', 'season' = 'year')) %>%
+#   left_join(player_exp_lookup, by = c("season", "team_id")) %>%
+#   left_join(team_smdi, by = c("season", "team_id")) %>%
+#   left_join(womens_teams, by = c("season", "team_id")) %>%
+#   left_join(power_conf, by = c("season", "team_id")) %>%
+#   left_join(bart_torvik, by = c("season", "team_id" = "Team ID")) %>%
+#   left_join(mm_perf, by = c("season", "team_id")) %>%
+#   #create pythagorean exp & wlPct AFTER weighting since I don't want to weight these
+#   mutate(
+#     deep_run = if_else(tourney_summary %in%
+#                          c("Final", "F4", "E8"), 1, 0)
+#   ) %>%
+#   # Drop non-model variables
+#   dplyr::select(-c(games, wins, tourney_team_flag,
+#             total_points, total_opp_points, conf_perf, X1))
+# 
+# df_2nd_away <- final_df_2H_away %>%
+#   left_join(dplyr::select(coach_lookup, -coach, -school), by = c('team_id', 'season' = 'year')) %>%
+#   left_join(player_exp_lookup, by = c("season", "team_id")) %>%
+#   left_join(team_smdi, by = c("season", "team_id")) %>%
+#   left_join(womens_teams, by = c("season", "team_id")) %>%
+#   left_join(power_conf, by = c("season", "team_id")) %>%
+#   left_join(bart_torvik, by = c("season", "team_id" = "Team ID")) %>%
+#   left_join(mm_perf, by = c("season", "team_id")) %>%
+#   #create pythagorean exp & wlPct AFTER weighting since I don't want to weight these
+#   mutate(
+#     deep_run = if_else(tourney_summary %in%
+#                          c("Final", "F4", "E8"), 1, 0)
+#   ) %>%
+#   # Drop non-model variables
+#   dplyr::select(-c(games, wins, tourney_team_flag,
+#             total_points, total_opp_points, conf_perf, X1))
+# 
+# 
+# write.csv(df_1st, "df_1st.csv")
+# write.csv(df_2nd_home, "df_2nd_home.csv")
+# write.csv(df_2nd_away, "df_2nd_away.csv")
