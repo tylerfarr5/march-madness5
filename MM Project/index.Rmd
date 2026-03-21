@@ -1,0 +1,2172 @@
+---
+title: "2026 Men's March Madness NCAA Basketball Tournament Matchup Predictions"
+author: "Tyler Farr"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# March Madness Matchup Predictions
+
+## Introduction
+
+**Objective**
+
+*Predict correct winners of the 2026 Men's NCAA March Madness tournament matchups through ensembles of various machine learning models (logistic regression, random forest, extreme gradient boosting (XGBoost), support vector machines (SVM), Naive Bayes, and multivariate adaptive regression splines (MARS))*
+
+-   For the 2023-2025 March Madness tournaments, the 2008-2022 Random Forest model performed the best, while doing an excellent job at identifying early round upsets, such as:
+    -   15 seed Princeton Sweet 16 run (**2023**)
+    -   5 seed San Diego State winning the championship (they lost in the **2023** championship!)
+    -   11 seed NC State to the Elite 8 (and they even surpassed this expectation! **2024** DJ Burnsss!)
+    -   11 seed Duquesne over BYU and 12 seeds Grand Canyon + James Madison over Saint Mary's + Wisconsin, respectively **(2024)**
+    -   12 seed Colorado State over Memphis **(2025)**
+
+I aim to compare how my predictions fared at the end of the 2026 March Madness tournament to see what was right (and hopefully not wrong!). Please see the **Results and Recommendations** section for a more detailed analysis of these model performances and my 2026 picks.
+
+**Background**
+
+The NCAA March Madness tournament is an annual basketball tournament held every March. 64 teams compete against each other in a single game elimination bracket style tournament. Individuals can build predictions on who they think will win for each possible matchup and how the bracket will turn out for each round of the March Madness tournament (Round of 64, Round of 32, Sweet 16, Elite 8, Final 4, and Championship). The odds of a perfect bracket are 1 in 9.2 quintillion, if you chose winners at random.
+
+Consequentially, I was interested in using my data science skills and machine learning models to help me in predicting the winners of these brackets. While I like to believe I will create a perfect bracket through intuition, the statistics on team performance throughout the year provide data backed decisions on who to choose for each matchup in the NCAA tournament.
+
+I am usually not very good at building a bracket, so I hope to let the data assist in making some (correct) decisions for me!
+
+*How are points calculated for March Madness brackets in the ESPN Tournament Challenge?*
+
+-   **Round of 64** = 10 points per correct pick (32 games)
+
+-   **Round of 32** = 20 points per correct pick (16 games)
+
+-   **Sweet 16** = 40 points per correct pick (8 games)
+
+-   **Elite 8** = 80 points per correct pick (4 games)
+
+-   **Final 4** = 160 points per correct pick (2 games)
+
+-   **Championship** = 320 points per correct pick (1 game)
+
+The maximum possible points you can earn for a perfect bracket is 1920 points. In general, I would say most of my brackets in the past have scored around 400 - 900 points. Winning a large bracket pool usually will take a score of least 1000 points (picking the champion or some of the final 4 teams), but it depends on how the pool plays year to year.
+
+It's extremely important to have your Elite 8 and Final 4 teams still alive after the first two rounds of the tournament because that keeps you in the running for the maximum points possible. The best bracket I have ever created was for the 2017 March Madness tournament, where I picked UNC to win the whole tournament and (luckily) chose South Carolina to be in the Final 4. This bracket scored a 1630.
+
+**Data Collection**
+
+The data is from the 2008 to 2025 March Madness tournament teams. There are 63 games every tournament and 1,143 teams over this time frame (1 team had to forfeit in 2021 due to COVID-19). I chose to start in 2008 due to availability of the data as well as I wanted to use data that relevantly reflected the style of play of today's game.
+
+Team data was scraped using the hoopR package created by Saiem Gilani (<https://hoopR.sportsdataverse.org>). Please check the file **dataset build.R** for the full dataset creation, including feature engineering and weighting analysis, and **March Madness Variable Documentation.pdf** for the documentation of the variables on on my Github.
+
+This data included:
+
+-   Season
+
+-   Team Name
+
+-   Tournament Performance
+
+-   Team Performance Metrics (per-game average)
+
+    -   Field Goal %
+    -   3-point %
+    -   Free Throw %
+    -   Total Rebounds
+    -   Offensive Rebounds
+    -   Defensive Rebounds
+    -   Assists
+    -   Steals
+    -   Blocks
+    -   Turnovers
+    -   Personal Fouls
+    -   Points Scored
+    -   Opponent Points Scored
+    -   Opponent Field Goal %
+    -   Opponent 3-point %
+    -   Effective Field Goal %
+    -   Margin of Victory
+    -   Win-Loss %
+    -   Foul Outs
+    -   Starters
+
+-   Advanced Metrics
+
+    -   Unadjusted Offensive/Defensive Efficiency
+    -   Pace of Play ("Possessions")
+    -   Extra Scoring Chances
+    -   \% of Starters Shooting 3's
+    -   \% of 3-point Shooters Shooting \>= 35%
+    -   Opponent Turnover / Team Turnover Ratio
+    -   Assists / Turnover Ratio
+    -   Win-Loss % in Close Games
+    -   \% of Close Games
+    -   \% of Blowout Games
+    -   Kill Shots
+    -   Starters vs. Minutes Played Discrepancy Index
+    -   Bart Torvik BARTHAG
+    -   Bart Torvik Adjusted Offensive Efficiency
+    -   Bart Torvik Adjusted Defensive Efficiency
+    -   Bart Torvik Wins Above Bubble (WAB)
+
+-   Team Metrics
+
+    -   Conference
+    -   Power Conference Indicator [ACC, SEC, Big12] (binary)
+    -   Power Conference (Extra) Indicator [ACC, SEC, Big12, Big Ten, Big East] (binary)
+    -   Conference Tournament Performance
+    -   \% of Guards
+    -   Team Health Status
+    -   Years of Experience
+    -   Women's Team Participating in March Madness Tournament Indicator (binary)
+
+-   Coach Metrics
+
+    -   Career Win-Loss %
+    -   Career Games Coached (Log-Adjusted)
+    -   Career March Madness Efficiency
+    -   Current School March Madness Efficiency
+
+-   Feature Engineered Variables
+
+    -   Pythagorean Win Expectation
+    -   Luck (a.k.a. Expected - Actual Win-Loss %)
+
+I purposefully excluded certain variables, such as team seeding, KenPom data, or NET/RPI ratings. I think this would bias the model and I want to ensure that the predictions made are truly purposed on team matchup, not the seed they are given. Additionally, KenPom's publically available data is only on post-tournament performance, not pre-tournament metrics.
+
+**Note:** The NCAA tournament selection committee, up until 2018, used the ratings percentage index (RPI), to decide which teams should play in the March Madness tournament or not. After 2018 they decided to switch to NCAA evaluation tool (NET) to pick teams, as it does a better job at evaluating a team's strength of schedule. Since the committee no longer uses this RPI variable to select teams, I was unsure of whether or not to include this variable in the model since the timeframe of my dataset covers both pre and post RPI use.
+
+-   *In a previous analysis done in July 2024, I performed a Likelihood Ratio Rest for a model with and without the two RPI variables (total team RPI and team RPI strength of schedule). The results of the test fails to reject the null hypothesis, proving that the smaller model (without RPI variables) is the better model. I used AIC and BIC to prove this evaluation and did decide to not include the RPI variables in the model at all.*
+    -   Please see the analysis here: <https://github.com/tylerfarr5/march-madness>
+
+## Methodology
+
+Here are the libraries I used to create this project:
+
+```{r message = FALSE, warning = FALSE}
+library(tidyverse)
+library(bookdown)
+library(ggplot2)
+library(car)
+library(corrplot)
+library(Hmisc)
+library(readxl)
+library(caret)
+library(glmnet)
+library(nortest)
+library(MASS)
+library(forcats)
+library(gmodels)
+library(vcdExtra)
+library(mgcv)
+library(DescTools)
+library(ROCit)
+library(randomForest)
+library(xgboost)
+library(smbinning)
+library(Ckmeans.1d.dp)
+library(e1071)
+library(klaR)
+library(earth)
+library(bookdown)
+library(reshape2)
+library(remotes)
+library(scales)
+```
+
+```{r message = FALSE, warning = FALSE}
+mm_data <- read.csv("final_df_no_bounds.csv")
+mm_data <- mm_data[, -1]
+```
+
+A quick snapshot of what the data frame looked like is provided below:
+
+```{r message = FALSE, warning = FALSE}
+head(mm_data)
+```
+
+```{r}
+mm_data$tourney_perf <- factor(
+  mm_data$tourney_perf,
+  levels = c("First Four - L", "R64 - L", 
+             "R32 - L", "S16 - L", "E8 - L",
+             "F4 - L", "Final - L",
+             "Final - W")
+)
+
+mm_data$tourney_summary <- factor(
+  mm_data$tourney_summary,
+  levels = c("First Four", "R64", 
+             "R32", "S16", "E8",
+             "F4", "Final")
+)
+
+mm_data$conf_perf <- factor(
+  mm_data$conf_perf,
+  levels = c("Did Not Play in Conference Tournament", "Early Round - L", 
+             "Quarterfinals - L", "Semifinals - L", "Final - L",
+             "Final - W")
+)
+
+mm_data$womens_team_tourney_flag <- factor(mm_data$womens_team_tourney_flag)
+mm_data$team_name <- factor(mm_data$team_name)
+mm_data$season <- factor(mm_data$season)
+mm_data$power_conf <- factor(mm_data$power_conf)
+mm_data$power_conf_extra <- factor(mm_data$power_conf_extra)
+mm_data$Conference <- factor(mm_data$Conference)
+mm_data$deep_run <- factor(mm_data$deep_run)
+```
+
+**Matchups**
+
+Since the dataset will be structured in a matchup structure, where we have TeamA and TeamB who play each other - here are some of the rules in place in the dataset:
+
+-   The higher seed will always be TeamA (home team) and the lower seed will be TeamB (away team)
+
+-   For matchups with two of the same seeds (ie: 1 v 1), then TeamA will be the team on the top of the tournament bracket. If it's the national championship and both teams are, for example, from the bottom of the bracket, then TeamA will be the team from the right side of the bracket.
+
+It is important to emphasize that tournament success in March Madness is truly matchup dependent. I will examine the characteristics of successful teams in the tourney, but the actual model will be built on matchups.
+
+To that extent, I differenced each teams' season statistics to evaluate how good or bad the teams are relative to their opponent. The differenced values were used as predictors in the model. This was: (TeamA - TeamB)
+
+While the model is built on the differenced matchup data, I chose to perform exploratory data analysis (EDA) on the team's individual stats (before differencing) to get a better idea of the profiles of successful teams.
+
+**Data Structure Assumptions**
+
+While building out the data for this analysis, I hoped to identify a team for what it was worth as they entered the tournament. This means I had to make some critical assumptions:
+
+1.  Team statistics from previous tournaments cannot include NCAA March Madness tournament performance. **All stats must be compiled from the beginning of the season through the Monday before the tournament starts.**
+
+    -   *In a previous analysis done in July 2024, I performed paired t-tests (Wilcoxon signed rank test) and tests of normality (Shapiro-Wilks test) to evaluate pre & post tournament performance on a variety of team metrics to see if there was a significant difference. There were **multiple variables that were statistically different before and after the tournament,** which led me to conclude that I needed to use pre-tournament numbers.*
+        -   Please see the analysis here: <https://github.com/tylerfarr5/march-madness>
+
+2.  I had the choice to build a continuous target variable (margin of victory) or a binary target variable (did TeamA win or lose?). I chose to model the binary target variable for whether or not TeamA won.
+
+3.  When considering team success/metrics, I wanted to give more weight to second half of the season performance vs. the first. Likewise, **every game in the March Madness tournament is an away game**, so I specifically sectioned the second half of the season performance to home & away games.
+
+    -   In order to do this, I calculated the optimal weight for each of these three time periods by building a quick logistic regression to determine which weight predicted a "deep run" in the tournament (Elite 8 or better).
+
+    -   Off of personal intuition, I ensured that the second half (away) games received the highest weight to create one dataset. Outside of my own intuition, I also let the model determine the optimal weight with no bounds to create a second dataset. Surprisingly, **the first half of the year had a very high relationship with the tournament performance**.
+
+    -   My assumption is that, like the NBA, the best predictors of post-season performance are 1) early in the season and 2) right after All Star break, which likely correlate with when a team is most healthy. While we can't guarantee the health of a team going in to March Madness, this relationship makes sense why the model might favor that as well.
+
+    -   The optimal weighting of the first half, second half-home, and second half-away is 30%, 40%, and 40%, respectively, when favoring the second half (away) games. The optimal weighting of the first half, second half-home, and second half-away is 50%, 30%, and 20%, respectively, when letting the model free-roam. Please see the code appendix for further information on how this was determined.
+
+There was no missing data in the dataset.
+
+## Exploratory Data Analysis (EDA)
+
+Here, I dive a little deeper into various relationships between the variables and team performance in the tournament. I am mainly interested in understanding the profiles of successful tournament teams.
+
+My favorite starting point is a correlation matrix of the numeric variables to see if there's any major multicollinearity or noticeable findings.
+
+There is a strong correlation between expected variables, like FG% and eFG% or a coach's career march madness performance vs. the current school. One interesting finding is a strong correlation between extra scoring chances and the opponent turnover to team turnover ratio. My hypothesis is that a higher OppTO/TeamTO ratio mean's the team is protecting the ball well, which in turn relates to fundamentals in basketball, where they also rebound well on offense.
+
+There is a strong negative correlation between WL % and a close game %. Expectedly, team's with higher margin of victories are less likely to face a loss. Another strong negative correlation is the AST/TO ratio and personal fouls, which makes sense as team with strong fundamentals and ball security are less likely to commit personal fouls.
+
+This one might be a spurrious correlation, but there is a strong negative correlation between free-throw % and offensive rebounds. My guess to explain this is that higher offensive rebounds leads to more second chances & getting fouled under the rim. Since those rebounding are typically bigs (centers and forwards), they probably don't shoot as well at the free throw line as guards, hence the lower free throw percentage (see DeAndre Jordan highlights).
+
+```{r warning = FALSE, message = FALSE}
+res <- mm_data %>%
+  dplyr::select(-deep_run, -tourney_perf, -tourney_summary, -womens_team_tourney_flag, -conf_perf, -Conference, -power_conf, -power_conf_extra, -team_name, -team_id, -season) %>%
+  cor(use = "complete.obs")
+
+colnames(res) <- c("FG% ", "3pt% ", "FT% ", "TRB ", "ORB ", "DRB ", "AST ", "STL ", "BLK ", "TO ", "PF ", "PPG ", "OppPPG ", "OppFG% ", "Opp3pt% ", "eFG% ", "MOV ", "Pace ", "Unadj Off Eff ", "Unadj Def Eff ", "Starters ", "Starters 3pt% ", "Starters 3pt >35% ", "ExtraScoreChances ", "OppTO/TO Ratio ", "AST/TO Ratio ", "Foul Outs ", "Adj Bayes Win% Close Games ", "Close Game % ", "Blowout Game % ", "Healthy Rate ", "Guard % ", "Kill Shot Count ", "Coach Career Adj Win % ", "Coach Career Games (Log) ", "Coach Career MM Perf ", "Coach Curr School MM Perf ", "Avg Team Exp ", "SMDI ", "AdjOE ", "AdjDE ", "BARTHAG ", "WAB ", "WL Pct ", "Pythagorean Expectation ", "Luck ")
+
+
+rownames(res) <- c("FG% ", "3pt% ", "FT% ", "TRB ", "ORB ", "DRB ", "AST ", "STL ", "BLK ", "TO ", "PF ", "PPG ", "OppPPG ", "OppFG% ", "Opp3pt% ", "eFG% ", "MOV ", "Pace ", "Unadj Off Eff ", "Unadj Def Eff ", "Starters ", "Starters 3pt% ", "Starters 3pt >35% ", "ExtraScoreChances ", "OppTO/TO Ratio ", "AST/TO Ratio ", "Foul Outs ", "Adj Bayes Win% Close Games ", "Close Game % ", "Blowout Game % ", "Healthy Rate ", "Guard % ", "Kill Shot Count ", "Coach Career Adj Win % ", "Coach Career Games (Log) ", "Coach Career MM Perf ", "Coach Curr School MM Perf ", "Avg Team Exp ", "SMDI ", "AdjOE ", "AdjDE ", "BARTHAG ", "WAB ", "WL Pct ", "Pythagorean Expectation ", "Luck ")
+
+corrplot::corrplot(res,type = "upper", order = "hclust", 
+                   tl.col = "black", tl.srt = 75, tl.cex = 0.6,
+#                   title = "Correlation Matrix on March Madness Matchup Data (2008-2025)", 
+                   mar=c(0,0,1,0))
+```
+
+Next, I also wanted to see these correlations in a tabular format so I could quickly sort through the strongest correlations. I used a function I found online to flatten out the correlation matrix to pair relationships.
+
+```{r warning = FALSE, message = FALSE}
+
+flattenCorrMatrix <- function(cormat) {
+  ut <- upper.tri(cormat)
+  data.frame(
+    row = rownames(cormat)[row(cormat)[ut]],
+    column = rownames(cormat)[col(cormat)[ut]],
+    cor  =(cormat)[ut]
+  )
+}
+
+res2<-rcorr(as.matrix(res))
+previous.correlations <- flattenCorrMatrix(res2$r)
+
+head(dplyr::arrange(previous.correlations, desc(cor)), 30)
+tail(dplyr::arrange(previous.correlations, desc(cor)), 30)
+```
+
+### Visual Exploration
+
+Looking at tournament performance - there is minor fluctuation from tournament to tournament, but generally speaking the higher seed wins \~69% of the time.
+
+Interestingly, 2015 and 2025 both had 3 or 4 1-seeds in the Final Four, respectively - which makes sense for the higher seed win percentage those years. However, 2017 saw a Final Four of two 1-seeds, a 3-seed, and a 7-seed - which means there was probably more chalk matchups throughout the earlier rounds.
+
+```{r message = FALSE, warning = FALSE}
+mm_matchup <- read.csv("matchups.csv")
+
+avg_home_win <- mean(mm_matchup$home_winner, na.rm = TRUE)
+
+ggplot(mm_matchup, aes(x = factor(season), fill = home_winner)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_manual(
+    values = c("TRUE" = "navy", 
+               "FALSE" = "lightblue"),
+    labels = c("Lower Seed Wins", "Higher Seed Wins"))+
+  labs(
+    title = paste0("Matchup Performance by Season (Higher Seed Avg Win % = ",
+                   percent(avg_home_win, accuracy = 0.1), ")"),
+    x = "Season",
+    y = "Win %",
+    fill = "Matchup Result"
+  ) +
+  theme_classic()
+```
+
+Next, let's further break this down by tournament performance and predictor variables. Starting with the categorical variables, I will examine:
+
+-   Women's Team Participation in March Madness Tournament
+-   Conference Tournament Performance
+-   Power Conference
+
+The women's team bid shows an interesting relationship where teams who make it to later rounds of the tournament have a women's team in the tournament as well. While the sample size for Final Four teams is considerably smaller, it is interesting that 71% of the Final Four teams had a women's team playing as well. My theory is that school spirit and team success go hand-in-hand during March Madness. To make this an even more stark contrast, I would like to know the seed of those women's teams.... perhaps women's teams that go far in the women's tournament goes hand in hand with men's teams going far in the tournament.
+
+While I was a student at NC State in 2024, I noticed this, as both the men's and women's teams made the Final Four!
+
+```{r message = FALSE, warning = FALSE}
+# Create summary table for percentages
+plot_df <- mm_data %>%
+  group_by(tourney_summary, womens_team_tourney_flag) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(tourney_summary) %>%
+  mutate(
+    pct = n / sum(n),
+    label = percent(pct, accuracy = 1)
+  )
+
+# Create sample size table for x-axis labels
+n_df <- mm_data %>%
+  group_by(tourney_summary) %>%
+  summarise(total_n = n())
+
+ggplot(plot_df, aes(x = tourney_summary, y = pct, fill = womens_team_tourney_flag)) +
+  geom_col(position = "fill") +
+  
+  # % labels inside bars
+  geom_text(aes(label = label),
+            position = position_fill(vjust = 0.5),
+            color = "white",
+            size = 4) +
+  
+  # Sample size above bars
+  geom_text(data = n_df,
+            aes(x = tourney_summary, y = 1.05, label = paste0("n = ", total_n)),
+            inherit.aes = FALSE,
+            size = 4) +
+  
+  scale_y_continuous(labels = percent_format(),
+                     limits = c(0, 1.1)) +
+  
+  scale_fill_manual(
+    values = c("lightblue", "navy"),
+    labels = c("No Women's Team", "Women's Team")
+  ) +
+  
+  labs(
+    title = "Distribution of Tournament Performance by Women's Team Participation",
+    x = "Tournament Performance",
+    y = "% Distribution",
+    fill = "March Madness Women's Team"
+  ) +
+  
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Now, moving on to how the conference tournament - this visual breaks out conference performance vs. March Madness performance. The main thing that sticks out to me is that there is a U-shaped distribution for teams that won their conference tournament (I investigate this below).
+
+60% of the teams that lose in the Round of 64 had won their conference tournament, which is primarily the weaker conferences that got auto-bids to the tournament.
+
+On the other hand, \~50% of the teams that lose in the Final Four or Championship had won their conference tournament, which is primarily the stronger P4 basketball conferences like the ACC, Big12, SEC, and Big10 (keeping in mind the smaller sample size though).
+
+```{r message = FALSE, warning = FALSE}
+
+# Create summary table for percentages
+plot_df <- mm_data %>%
+  group_by(tourney_summary, conf_perf) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(tourney_summary) %>%
+  mutate(
+    pct = n / sum(n),
+    label = percent(pct, accuracy = 1)
+  ) %>%
+  filter(tourney_summary != "First Four")
+
+# Create sample size table for x-axis labels
+n_df <- mm_data %>%
+  group_by(tourney_summary) %>%
+  summarise(total_n = n()) %>%
+  filter(tourney_summary != "First Four")
+
+ggplot(plot_df, aes(x = tourney_summary, y = pct, fill = conf_perf)) +
+  geom_col(position = "fill") +
+  
+  # % labels inside bars
+  geom_text(aes(label = label),
+            position = position_fill(vjust = 0.5),
+            color = "white",
+            size = 4) +
+  
+  # Sample size above bars
+  geom_text(data = n_df,
+            aes(x = tourney_summary, y = 1.05, label = paste0("n = ", total_n)),
+            inherit.aes = FALSE,
+            size = 4) +
+  
+  scale_y_continuous(labels = percent_format(),
+                     limits = c(0, 1.1)) +
+
+  scale_fill_manual(
+    values = c("red", "darkgrey", "lightblue", "navy", "lightgrey", "black")
+  ) +
+  
+  labs(
+    title = "Distribution of Tournament Performance by Conference Tournament Performance",
+    x = "Tournament Performance",
+    y = "% Distribution",
+    fill = "Conference Tournament"
+  ) +
+  
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+After seeing this graph, my immediate next question was - how can I facet this by the conference they play in. This highlights my exact point, where non-power conferences make up 81% of the R64 losses, while power conferences only make up 9% of the R64 losses.
+
+On the other hand, for the teams that won their conference championship & were not in a power conference, that is a very small sample size (ie: San Diego St, Gonzaga, Butler, 2014 UConn), whereas power conference teams who won their conference tournament make up \~50% of the Final Four/Championship teams.
+
+Similarly, I see teams that lost in the Quarterfinals of their conference tournament are primarily R64 or R32 losses. I wonder if this is because they lost early and had more time off between the loss and the start in tournament, so they could be rusty at the start of the tournament. Similarly, I noticed Gonzaga won the WCC conference tournament, but their tournament ended a full week before March Madness started.
+
+```{r message = FALSE, warning = FALSE}
+
+# 1. Update summary table to include the binary variable
+plot_df <- mm_data %>%
+  group_by(power_conf_extra, tourney_summary, conf_perf) %>% 
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(power_conf_extra, tourney_summary) %>%
+  mutate(
+    pct = n / sum(n),
+    label = percent(pct, accuracy = 1)
+  ) %>%
+  filter(tourney_summary != "First Four")
+
+# 2. Update sample size table to include the binary variable
+n_df <- mm_data %>%
+  group_by(power_conf_extra, tourney_summary) %>% 
+  summarise(total_n = n(), .groups = "drop") %>%
+  filter(tourney_summary != "First Four")
+
+# 3. Create the faceted plot
+ggplot(plot_df, aes(x = tourney_summary, y = pct, fill = conf_perf)) +
+  geom_col(position = "fill") +
+  
+  # % labels inside bars
+  geom_text(aes(label = label),
+            position = position_fill(vjust = 0.5),
+            color = "white",
+            size = 3.5) + # Slightly smaller to fit side-by-side
+  
+  # Sample size above bars
+  geom_text(data = n_df,
+            aes(x = tourney_summary, y = 1.05, label = paste0("n = ", total_n)),
+            inherit.aes = FALSE,
+            size = 3) +
+  
+  # The magic line: Faceting
+  facet_wrap(~power_conf_extra,
+             labeller = labeller(power_conf_extra = 
+                                   c("0" = "Non Power Conference", 
+                                    "1" = "Power Conference (Big12, SEC, ACC, Big Ten, Big East)"))) + 
+  
+  scale_y_continuous(labels = percent_format(),
+                     limits = c(0, 1.1)) +
+
+  scale_fill_manual(
+    values = c("red", "darkgrey", "lightblue", "navy", "lightgrey", "black")
+  ) +
+  
+  labs(
+    title = "Tournament Performance Distribution",
+    subtitle = "Faceted by Power Conference",
+    x = "Tournament Performance",
+    y = "% Distribution",
+    fill = "Conference Tournament"
+  ) +
+  
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "lightgrey"), # Adds style to facet labels
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+I will now examine tournament performance and numerical predictor variables. For simplicity, I look at all numeric variables at once. Here are the variables that show an increasing trend in value as we get to later rounds of the tournament:
+
+-   Assists
+-   Assists:Turnover Ratio
+-   Blocks
+-   Blowout Game %
+-   Coach Career March Madness Performance
+-   Coach Current School March Madness Performance
+-   Coach Career Games Coached
+-   Extra Scoring Chances
+-   Kill Shot Count
+-   Margin of Victory
+-   Offensive Rebounds
+-   Pythagorean Expectation Win %
+-   Win/Loss %
+-   WAB
+
+Some of these make perfect sense, such as who is coaching, regular season win percentage or percentage of games beating an opponent by 20+. These are signs that indicate dominance, so we would expect these kinds of teams to go further. They are probably top seeds as well.
+
+Additionally, some variables showed a decreasing trend as we get to later rounds of the tournament:
+
+-   Close Game %
+-   Foul Outs
+-   Healthy Rate
+-   Opponent PPG
+-   Guard %
+-   Personal Fouls
+-   SMDI
+-   Total Turnovers
+
+Here, teams that have played in closer games all season, give up a lot of points, are injured, or even playing sloppy and fouling out.... These are all trends of teams that lose earlier in the tournament. I think an interesting trend is the teams in later rounds of the tournament are also have a slightly lower percentage of guards starting.
+
+Notably, a weird trend I saw was with luck. This variable had negative values for all rounds except the Sweet16. My hypothesis is that the 'lucky' teams probably burn out their luck around the Sweet16 but make some early upsets to get them there!
+
+```{r}
+# Select numeric variables (exclude IDs if needed)
+num_vars <- mm_data %>%
+  dplyr::select(where(is.numeric)) %>%
+  dplyr::select(-team_id) 
+
+# Pivot longer and summarize
+plot_df <- mm_data %>%
+  dplyr::select(tourney_summary, where(is.numeric)) %>%
+  dplyr::select(-team_id) %>%   # remove numeric IDs if needed
+  pivot_longer(
+    cols = -tourney_summary,
+    names_to = "variable",
+    values_to = "value"
+  ) %>%
+  group_by(tourney_summary, variable) %>%
+  summarise(
+    mean_value = mean(value, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(tourney_summary != "First Four")
+
+# Plot
+ggplot(plot_df, aes(x = tourney_summary, y = mean_value)) +
+  geom_col(fill = "navy") +
+  facet_wrap(~ variable, scales = "free_y") +
+  labs(
+    title = "Average Numeric Variables by Tournament Performance",
+    x = "Tournament Performance",
+    y = "Mean Value"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+Lastly, here is a quick visual of what teams have played in the most March Madness games. Gonzaga, Kansas, and Michigan State lead the way with the majority of tournament appearances since 2008. This does not necessarily mean that they will win matchups, but it does indicate that they are teams who are experienced in showing up at the March Madness tournament. Tough teams to bet against.
+
+```{r}
+barplot(sort(table(mm_data$team_name), decreasing = TRUE)[1:10],
+        main = 'Top 10 Teams to Play in March Madness (2008-2025)',
+        xlab = 'Teams',
+        ylab = 'Total Games Played', las = 1, cex.names = 0.8)
+```
+
+```{r}
+barplot(sort(table(mm_data$Conference[mm_data$Conference != "Other"]), decreasing = TRUE),
+        main = 'Top Conferences to Play in March Madness (2008-2025)',
+        xlab = 'Teams',
+        ylab = 'Total Games Played', las = 1, cex.names = 0.8)
+```
+
+I am also interested in the variation from tournament to tournament, so I plotted all of the numeric variables over each season. Irregardless of their tournament performance, these trends help define the profile of a tournament team.
+
+These variables have been trending upwards in recent years:
+
+-   Assists:Turnover Ratio
+-   Average Years of Experience
+-   Blowout Percentage
+-   Coach Career Win %
+-   Effective FG%
+-   FG%
+-   Free Throw %
+-   Healthy Rate
+-   Kill Shot Count
+-   Luck
+-   Opponent PPG
+-   PPG
+-   SMDI
+-   Starters
+-   3pt % by starters
+-   Steals
+-   Unadjusted Offensive Efficiency
+-   Unadjusted Defensive Efficiency
+
+These variables have been trending downwards in recent years:
+
+-   Blocks
+-   Foul Outs
+-   Opponent 3pt %
+-   Offensive Rebounds
+-   Personal Fouls
+-   Starters shooting \>= 35% from 3pt
+-   3pt%
+-   Turnovers
+-   Total rebounds
+-   BARTHAG
+
+```{r}
+mm_data %>%
+  dplyr::select(season, where(is.numeric), -team_id) %>%
+  pivot_longer(-season, names_to = "variable", values_to = "value") %>%
+  group_by(season, variable) %>%
+  summarise(mean_value = mean(value, na.rm = TRUE), .groups = "drop") %>%
+  ggplot(aes(x = season, y = mean_value, group = 1)) +
+  geom_line() +
+  facet_wrap(~ variable, scales = "free_y") +
+  theme_classic()
+```
+
+Additionally, I explored some density plots which show a strong separation between a "deep run" in the tournament, where a deep run going to the Elite 8, Final 4, or Championship. WAB, the pythagorean expected win %, and a coach's career performance in March are the three best variables I found for creating a separation of team's that make a deep run in the tournament vs. not. There are always exceptions, but these variables have created a clear separation between tourney performancre.
+
+```{r}
+mm_data %>%
+  dplyr::select(deep_run,
+         pyth_exp,
+         coach_career_adj_march_eff, 
+         WAB) %>%
+  pivot_longer(-deep_run,
+               names_to = "variable",
+               values_to = "value") %>%
+  ggplot(aes(x = value, fill = factor(deep_run))) +
+  geom_density(alpha = 0.4) +
+  facet_wrap(~ variable, scales = "free", nrow = 1) +
+  labs(
+    title = "Density Comparison: Deep Run Teams (E8-Champ) vs. Early Exit Teams (R64-S16)",
+    x = "Value",
+    y = "Density",
+    fill = "Deep Run"
+  ) +
+  theme_classic()
+```
+
+## Modeling Preparation
+
+**Matchup Dataset Creation**
+
+As mentioned earlier, the model will be built on matchup data, where the team stats are differenced. The calculation is Team A (Home) {stat} - Team B (Away) {stat}.
+
+```{r}
+#Data cleanup
+mm_matchup$season <- as.factor(mm_matchup$season)
+
+#Creating target variable
+mm_matchup$Team_A_Winner <- as.factor(ifelse(mm_matchup$home_winner, 1, 0))
+
+
+#Temporarily converting the binary flags to numeric so I can subtract them
+mm_data$womens_team_tourney_flag <- as.numeric(as.character(mm_data$womens_team_tourney_flag))
+mm_data$power_conf <- as.numeric(as.character(mm_data$power_conf))
+mm_data$power_conf_extra <- as.numeric(as.character(mm_data$power_conf_extra))
+
+#Removing variables that won't be in final model
+mm_data <- mm_data %>%
+  dplyr::select(-tourney_summary, -tourney_perf, -deep_run, -Conference)
+
+#Join team stats for matchups
+matchup_full <- mm_matchup %>%
+  left_join(mm_data, by = c("home_id" = "team_id", "season")) %>%
+  rename_with(~paste0(., "_home"), .cols = -colnames(mm_matchup)) 
+  
+matchup_full <- matchup_full %>%
+  left_join(mm_data, by = c("away_id" = "team_id", "season")) %>%
+  rename_with(~paste0(., "_away"), .cols = -colnames(matchup_full))
+  
+#identify numeric columns
+numeric_vars <- mm_data %>% 
+  dplyr::select(where(is.numeric)) %>%
+  # Remove the ID columns so we don't try to subtract team_ids
+  dplyr::select(-any_of(c("team_id"))) %>% 
+  colnames()
+
+#define full dataframe
+matchup_final <- matchup_full
+
+#Loop to difference columns
+for (var in numeric_vars) {
+  home_col <- paste0(var, "_home")
+  away_col <- paste0(var, "_away")
+  diff_col <- paste0(var, "_diff")
+  
+  matchup_final[[diff_col]] <- matchup_final[[home_col]] - matchup_final[[away_col]]
+}
+
+#Drop home and away fields, only want the differened columns
+cols_to_drop <- c(paste0(numeric_vars, "_home"), paste0(numeric_vars, "_away"))
+
+matchup_final <- matchup_final %>%
+  dplyr::select(-any_of(cols_to_drop), -X)
+
+
+#Convert binary flags back to 0/1 factor variables
+matchup_final$womens_team_tourney_flag_diff <- as.factor(matchup_final$womens_team_tourney_flag_diff)
+matchup_final$power_conf_diff <- as.factor(matchup_final$power_conf_diff)
+matchup_final$power_conf_extra_diff <- as.factor(matchup_final$power_conf_extra_diff)
+
+
+matchup_final <- matchup_final %>%
+  dplyr::select(-game_date, -home_winner, -away_winner,
+                -team_name_home, -team_name_away)
+```
+
+**Conditional Matchup Dataset Creation**
+
+There are two ways to evaluate my March Madness model. One is I can test the AUC of each model, for the matchups that already happened, and see the performance of the various models.
+
+However, since I am building this bracket and do not know what the matchups will be beyond the known Round of 64, I am also testing the total ESPN points earned within the bracket. That is both if we let the model choose every matchup, as well as the points it would have earned.
+
+In order to do this, I need to create a conditional dataset for every possible matchup in the 2023-2025 tournaments (in the instances where the model is wrong, I need to evaluate the hypothetical matchup my model creates to compare to the truth).
+
+```{r}
+# Get unique teams per season
+teams_per_season <- matchup_full %>%
+  filter(season %in% c(2023, 2024, 2025)) %>%
+  dplyr::select(season, home_id, home_short_display_name) %>%
+  rename(team_id = home_id, team_name = home_short_display_name) %>%
+  bind_rows(
+    matchup_full %>%
+      filter(season %in% c(2023, 2024, 2025)) %>%
+      dplyr::select(season, away_id, away_short_display_name) %>%
+      rename(team_id = away_id, team_name = away_short_display_name)
+  ) %>%
+  distinct(season, team_id, team_name)
+
+# Generate all possible matchups per season
+conditional_matchup_final <- teams_per_season %>%
+  group_by(season) %>%
+  group_modify(~ {
+    teams <- .x
+    # Create all ordered pairs (A vs B and B vs A are both included)
+    expand.grid(
+      home_idx = seq_len(nrow(teams)),
+      away_idx = seq_len(nrow(teams))
+    ) %>%
+      filter(home_idx != away_idx) %>%  # remove self-matchups
+      transmute(
+        home_id   = teams$team_id[home_idx],
+        home_short_display_name = teams$team_name[home_idx],
+        away_id   = teams$team_id[away_idx],
+        away_short_display_name = teams$team_name[away_idx]
+      )
+  }) %>%
+  ungroup()
+
+# Check output
+cat("Total matchups generated:", nrow(conditional_matchup_final), "\n")
+cat("Matchups per season:\n")
+print(table(conditional_matchup_final$season))
+
+# Verify - for a 64 team tournament each team should play 63 others
+teams_per_season %>%
+  count(season, name = "n_teams") %>%
+  mutate(expected_matchups = n_teams * (n_teams - 1)) %>%
+  print()
+
+
+
+#Join team stats for conditional matchups
+conditional_dat <- conditional_matchup_final %>%
+  left_join(mm_data, by = c("home_id" = "team_id", "season")) %>%
+  rename_with(~paste0(., "_home"), .cols = -colnames(conditional_matchup_final)) 
+  
+conditional_dat <- conditional_dat %>%
+  left_join(mm_data, by = c("away_id" = "team_id", "season")) %>%
+  rename_with(~paste0(., "_away"), .cols = -colnames(conditional_dat))
+
+
+conditional_data_final <- conditional_dat
+
+#Loop to difference columns
+for (var in numeric_vars) {
+  home_col <- paste0(var, "_home")
+  away_col <- paste0(var, "_away")
+  diff_col <- paste0(var, "_diff")
+  
+  conditional_data_final[[diff_col]] <- conditional_data_final[[home_col]] - conditional_data_final[[away_col]]
+}
+
+conditional_data_final <- conditional_data_final %>%
+  dplyr::select(-any_of(cols_to_drop))
+
+
+#Convert binary flags back to 0/1 factor variables
+conditional_data_final$womens_team_tourney_flag_diff <- as.factor(conditional_data_final$womens_team_tourney_flag_diff)
+
+conditional_data_final$power_conf_diff <- as.factor(conditional_data_final$power_conf_diff)
+
+conditional_data_final$power_conf_extra_diff <- as.factor(conditional_data_final$power_conf_extra_diff)
+
+
+mm_data$womens_team_tourney_flag <- as.factor(mm_data$womens_team_tourney_flag)
+mm_data$power_conf <- as.factor(mm_data$power_conf)
+mm_data$power_conf_extra <- as.factor(mm_data$power_conf_extra)
+
+conditional_data_final <- conditional_data_final %>%
+  dplyr::select(-team_name_home, -team_name_away)
+
+
+#Need to numeric encode the conference performance variables
+round_order <- c(
+  "Did Not Play in Conference Tournament" = 0,
+  "Early Round - L" = 1,
+  "Quarterfinals - L" = 2,
+  "Semifinals - L" = 3,
+  "Final - L" = 4,
+  "Final - W" = 5
+)
+
+
+conditional_data_final$conf_perf_home_num <- as.numeric(factor(conditional_data_final$conf_perf_home, 
+                                               levels = names(round_order)))
+conditional_data_final$conf_perf_away_num <- as.numeric(factor(conditional_data_final$conf_perf_away, 
+                                               levels = names(round_order)))
+
+```
+
+## Modeling
+
+Now that the dataset is created, I am able to build out a variety of models I plan to test, including:
+
+-   Logistic Regression
+-   Random Forest
+-   XGBoost
+-   Support Vector Machine (SVM)
+-   Naive Bayes
+-   Multivariate Adaptive Regression Splines (MARS)
+
+**Model Evaluation**
+
+I chose to evaluate my models using area under the receiver operating characteristic (AUROC) curve, which balances sensitivity and specificity. Since the best bracket is typically the one that scores the most points in the ESPN Tournament Challenge, I also evaluated how well my model scored in terms of ESPN points.
+
+As mentioned above, I generated every possible matchup for the 2023 - 2025 tournaments, so I could evaluate what the model chose in later matchups where it may have picked the wrong team to win in earlier rounds of the tournament.
+
+**Train/Test Split**
+
+Before the model is built, I did a train/test split of the 2008 to 2025 tournaments data. I chose to use the 2023-2025 tournaments as my test dataset and the 2008-2022 tournaments as the train dataset. The training set is 925 rows and the testing set is 201 rows.
+
+```{r message = FALSE, warning = FALSE}
+train <- matchup_final[matchup_final$season %in% c(2008:2022),] 
+valid <- matchup_final[matchup_final$season %in% c(2023,2024,2025),] 
+
+train <- as.data.frame(train) #this helps SMBinning work
+valid <- as.data.frame(valid) #this helps SMBinning work
+```
+
+```{r warning= FALSE, message = FALSE, echo = FALSE}
+paste("Train Data (2008-2022 brackets) - Rows:", nrow(train))
+paste("Test Data (2023-2025 brackets) - Rows:", nrow(valid))
+```
+
+**Conservative Alpha Level and Weighting**
+
+A conservative alpha level of 0.01, instead of 0.05, was chosen for model significance testing since there are 925 observations in the training set and we need to adjust it to reflect a higher sample size.
+
+-   In a previous analysis done in July 2024, I explored creating weights, so that the model puts higher importance on a Round of 64 vs. a Championship matchup. My predictions for the Elite 8 won't matter if I don't have any correct teams in the Elite 8. Unfortunately, this model did not really significantly outperform other models.
+
+    -   Please see the analysis here: <https://github.com/tylerfarr5/march-madness>
+
+**Logistic Regression**
+
+Logistic Regression is by far the most time intensive model in terms of validating assumptions, binning, and coding out the model. I start by validating assumptions of the logistic regression model in my dataset, which are independent rows and the continuous predictor variables are linearly related to the logit.
+
+I first explored a distribution of each variable in the model (**full output can be found in the appendix**). Every variable was Normally distributed, with only slight skewness and not needing any major transformations.
+
+In regard to checking the linearity assumption for the continuous predictor variables, I fit a GAM model and a logistic regression model with only one of the predictor variables at a time. Next, I run an Chi-Square ANOVA test to see if there is a statistically significant difference between the GAM model and the logit model. The loop prints out for each variable if the assumption was met or not met.
+
+```{r warning = FALSE, message = FALSE }
+drop_cols <- c("season", "home_id", "away_id", 
+               "home_short_display_name", "away_short_display_name")
+
+train_LR        <- train[, !names(train) %in% drop_cols]
+valid_LR        <- valid[, !names(valid) %in% drop_cols]
+conditional_LR  <- conditional_data_final[, !names(conditional_data_final) %in% drop_cols]
+
+#need to add a fake Team_A_Winner column to get the binning to work
+new_binary_var <- sample(c(0, 1), size = nrow(conditional_LR), replace = TRUE) 
+
+# Add the new variable to the front of the dataframe using cbind
+conditional_LR <- cbind("Team_A_Winner" = new_binary_var, conditional_LR)
+
+
+var.names <- names(train_LR)[sapply(train_LR, is.numeric)]
+
+
+assumption_df <- data.frame("Variable" = as.character(), "Assumption" = as.character(), "P-Value" = as.numeric(), "EDF" = as.numeric())
+
+for (i in var.names) {
+  xvar <- (train_LR[[i]]) #this is needed to get the gam to run
+  fit.gam <- mgcv::gam(Team_A_Winner~s(xvar), data = train_LR, 
+                      family = binomial(link = "logit"), 
+                      method = "REML")
+  logit.model <- glm(Team_A_Winner ~ train_LR[[i]], 
+                     data = train_LR, 
+                     family = binomial(link = "logit"))
+  pval <- anova(logit.model, fit.gam, test = 'Chisq')$`Pr(>Chi)`[2]
+  
+  if (pval < 0.01) {
+    assumption_df[nrow(assumption_df) + 1,] = c(i, "ASSUMPTION NOT MET", round(pval,5), summary(fit.gam)$edf)
+    #print(paste(i, "**___ASSUMPTION NOT MET___**", "P-Value - ",round(pval,5), "EDF - ", round(summary(fit.gam)$edf),5))
+  } else {
+    assumption_df[nrow(assumption_df) + 1,] = c(i, "Passed", round(pval,5), summary(fit.gam)$edf)
+    #print(paste(i, "Assumption Met", "P-Value - ", round(pval,5), "EDF - ", round(summary(fit.gam)$edf),5))
+  }
+  
+  #plot(fit.gam, xlab = i) Not printing to save space
+}
+```
+
+```{r}
+head(assumption_df)
+```
+
+Since over half of the variables did not pass the linearity assumption, I decided to explore strategically binning all continuous variables via SMBinning. The code below finds the optimal splits in a continuous variable that still capture the signal associated with predicting the winner of the matchup, however now transform the continuous to a categorical variable.
+
+If a variable has no significant splits, that means the algorithm could not identify a significant split for the continuous variable, so it will be kept as one bucket. An example of the distribution of the Pythagorean Expectation and average margin of victory (MOV) variables are provided below. As you can see, there is a fairly stark difference in the MOV buckets, which should make for a good variable in the model.
+
+The third plot shows the strongest predictors within the model based on information value (IV). IV measures the ability of a variable to separate winners and losers. While this metric is mostly used for variable selection in banking, I find it effective in this situation as well. I think it's important to recognize that a common cutoff in banking is an IV greater than or equal to 0.1 to select variables, however, I wanted to keep all binned variables that were binned with an IV greater than or equal to 0.01 (which ended up being all variables binned).
+
+Notably, the Bart Torvik BARTHAG, WAB, Adjusted Off/Def variables, and coach carere winning percentage are the strongest predictors.
+
+```{r warning = FALSE, message = FALSE, echo= FALSE}
+train_LR$Team_A_Winner <- as.numeric(as.character(train_LR$Team_A_Winner))
+
+allBins <- c()
+#generates possible bins for numeric vars
+for (i in var.names){
+  allBins[[i]] = smbinning(df = train_LR, y = "Team_A_Winner", x = i) 
+}
+```
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+#plots of strong variables
+smbinning.plot(allBins$pyth_exp_diff,option="dist",sub="Pyth Exp Win %")
+smbinning.plot(allBins$mov_diff,option="dist",sub="Avg MOV")
+smbinning.plot(allBins$coach_career_adj_win_pct_diff,option="dist",sub="Coach Career Win %")
+
+#evaluates variables
+smbinning.sumiv.plot(smbinning.sumiv(df = train_LR[,c("Team_A_Winner", var.names)], y = "Team_A_Winner"), cex = 0.6)
+
+```
+
+```{r warning = FALSE, message = FALSE, include = FALSE, echo = FALSE}
+#test if IV > 0.01. 0.1 is standard for credit modeling, but want to increase predictability, and then generates binned column
+for (j in var.names) {
+  if (is.na(allBins[[j]]["iv"])) {
+    next
+  } else if (allBins[[j]]["iv"] >= 0.01) {
+    train_LR <- smbinning.gen(df = train_LR, ivout = allBins[[j]], chrname = paste(j, "_bin", sep = ""))
+  }
+}
+
+for (j in var.names) {
+  if (is.na(allBins[[j]]["iv"])) {
+    next
+  } else if (allBins[[j]]["iv"] >= 0.01) {
+    valid_LR <- smbinning.gen(df = valid_LR, ivout = allBins[[j]], chrname = paste(j, "_bin", sep = ""))
+  }
+}
+
+for (j in var.names) {
+  if (is.na(allBins[[j]]["iv"])) {
+    next
+  } else if (allBins[[j]]["iv"] >= 0.01) {
+    conditional_LR <- smbinning.gen(df = conditional_LR, ivout = allBins[[j]], chrname = paste(j, "_bin", sep = ""))
+  }
+}
+```
+
+Now, let's jump into the logistic regression model. By converting all variables to categorical via SMBinning, the logistic regression has now passed all of its assumptions. I added significant variables after strategically binning, which all had an IV of at least 0.01.
+
+From here, I performed backward selection to identify the most important binned variables (and non-binned categorical variables I originally had in my dataset) to keep in the final model. This left me with 8 binned variables:
+
+-   Blocks
+-   Extra Scoring Chances
+-   Coach Career Adjusted Win %
+-   Adjusted Offensive Efficiency
+-   Adjusted Defensive Efficiency
+
+I did one final check of multicollinearity with VIF and a likelihood ratio test to ensure all variables were significant and not correlated. Both checks passed!
+
+```{r message = FALSE, warning= FALSE, include = FALSE, echo = FALSE}
+full.model <- glm(Team_A_Winner ~ oreb_diff_bin + stl_diff_bin + blk_diff_bin +
+                    to_diff_bin + pers_fouls_diff_bin + opp_ppg_diff_bin +
+                    mov_diff_bin + unadj_off_eff_diff_bin + unadj_def_eff_diff_bin + extraScoreChances_diff_bin + oppTO_teamTO_ratio_diff_bin + ast_TO_ratio_diff_bin + close_pct_diff_bin + blowout_pct_diff_bin + kill_shot_count_diff_bin + coach_career_adj_win_pct_diff_bin + coach_curr_school_march_eff_diff_bin + coach_career_adj_march_eff_diff_bin + wlpct_diff_bin + pyth_exp_diff_bin +
+                    +AdjOE_diff_bin + AdjDE_diff_bin + BARTHAG_diff_bin + WAB_diff_bin
+                  
+                  +fgpct_diff_bin + ast_diff_bin + ppg_diff_bin + opp_fgpct_diff_bin + efgpct_diff_bin + foul_outs_diff_bin + healthy_rate_diff_bin + kill_shot_count_diff_bin 
+                  
+                  #non bin variables
+                  + conf_perf_home + conf_perf_away
+                  + womens_team_tourney_flag_diff
+                  + power_conf_diff
+                  + power_conf_extra_diff, 
+                        data = train_LR,
+                      family = binomial(link = "logit"))
+
+empty.model <- glm(Team_A_Winner ~ 1, data = train_LR, family = binomial(link = "logit"))
+
+#use 0.01 to adjust for sample size
+step.model <- step(full.model, scope = list(lower = empty.model, upper = full.model), direction = "backward", k = qchisq(0.01, 1, lower.tail = FALSE))
+```
+
+```{r message = FALSE, warning = FALSE}
+new.model <- glm(Team_A_Winner ~ blk_diff_bin + extraScoreChances_diff_bin + AdjOE_diff_bin + 
+    AdjDE_diff_bin, 
+                 data = train_LR, 
+                 family = binomial(link = "logit"))
+
+#Checking multicollinearity and using Likelihood Ratio Test (LRT)
+car::vif(new.model) #all < 5 GVIF
+car::Anova(new.model, test = 'LR', type = 'III') #all sig
+```
+
+After building the model, I did a quick evaluation metric using the coefficient of discrimination (plotting how well the model separates winners and losers). It appears the model does a somewhat good job of discriminating between winners and losers when the predicted probability is either very high or very low. However, predicted probabilities closer to 0.5 to 0.7 are a tossup and it does worse at differentiating between winners and losers.
+
+```{r message = FALSE, warning = FALSE, echo = FALSE}
+p_hat <- predict(new.model, type = "response")
+logit_roc <- rocit(p_hat, train_LR$Team_A_Winner)
+
+p1 <- p_hat[train_LR$Team_A_Winner == 1]
+p0 <- p_hat[train_LR$Team_A_Winner == 0]
+
+coef_discrim <- mean(p1) - mean(p0)
+
+ggplot(train_LR, aes(p_hat, fill = factor(Team_A_Winner))) + 
+  geom_density(alpha = 0.7) + 
+  scale_fill_grey() + 
+  labs(x = "Predicted Probability", fill = "Outcome", title = paste("Coefficient of Discrimination = ", round(coef_discrim,3), sep = ""))
+```
+
+**Random Forest**
+
+The next model to test was a Random Forest. The first step is to see what the best number of trees to use for the model. It appears the MSE levels out around 250 trees, but to be safe since computing time isn't an issue here, I use 500 trees.
+
+```{r message = FALSE, warning = FALSE, echo = FALSE, include = FALSE}
+#resets training set & removes bins created above
+train <- matchup_final[matchup_final$season %in% c(2008:2022),] 
+valid <- matchup_final[matchup_final$season %in% c(2023,2024,2025),] 
+
+drop_cols <- c("season", "home_id", "away_id", 
+               "home_short_display_name", "away_short_display_name")
+
+train_rf        <- train[, !names(train) %in% drop_cols]
+valid_rf        <- valid[, !names(valid) %in% drop_cols]
+conditional_rf  <- conditional_data_final[, !names(conditional_data_final) %in% drop_cols]
+
+```
+
+```{r message = FALSE, warning = FALSE, echo = FALSE}
+set.seed(12345) #can set ntree to 500 or 1000
+rf.mm <- randomForest(Team_A_Winner ~ ., data = train_rf, ntree = 500, 
+                      importance = TRUE, method = 'class')
+
+plot(rf.mm, main = "Number of Trees Compared to MSE")
+```
+
+The next step is to tune the Random Forest model with 500 trees. I need to figure out the optimal number of random variables to use at each split, so I create an elbow plot. The out-of-bag observation error is minimized with an mtry of 3, so that is what I will use to train the model.
+
+```{r warning = FALSE, message = FALSE}
+#tuning model
+set.seed(12345)
+tuneRF(x = train_rf[,-1], y = train_rf[,1], #column 1 has response variable
+       plot = TRUE, ntreeTry = 500, stepFactor = 0.5, method = 'class')
+
+#above output said optimal mtry is 3.
+set.seed(12345)
+rf.mm <- randomForest(Team_A_Winner ~ ., 
+                      data = train_rf, ntree = 500, mtry = 3, importance = TRUE,
+                      method = 'class')
+```
+
+After defining the Random Forest model, I summarize it with a variable importance plot. Using mean decrease in accuracy as well as mean decrease in Gini as evaluation metrics, it appears that the top predictors are:
+
+-   Bart Torvik BARTHAG
+-   Bart Torvik Adj DE + OE
+-   Bart Torvik WAB
+-   Coach Career Adj Win %
+-   Blowout %
+
+```{r warning = FALSE, echo = FALSE, message = FALSE}
+# variable importance
+varImpPlot(rf.mm,
+           sort = TRUE,
+           n.var = 25,
+           main = "Variable Importance Plots for Random Forest",
+           cex = 0.6)
+```
+
+**XGBoost**
+
+The next model I tried was an Xtreme Gradient Boosting (XGBoost) model. Like a tree-based algorithm that Random Forest uses, this model sequentially builds its trees based on the error of the previous split.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE, include = FALSE}
+#resets training set & removes bins created above
+train <- matchup_final[matchup_final$season %in% c(2008:2022),] 
+valid <- matchup_final[matchup_final$season %in% c(2023,2024,2025),] 
+
+
+#Need to numeric encode the conference performance variables
+round_order <- c(
+  "Did Not Play in Conference Tournament" = 0,
+  "Early Round - L" = 1,
+  "Quarterfinals - L" = 2,
+  "Semifinals - L" = 3,
+  "Final - L" = 4,
+  "Final - W" = 5
+)
+
+#Create numeric versions of conf_perf columns
+train$conf_perf_home_num <- as.numeric(factor(train$conf_perf_home, 
+                                               levels = names(round_order)))
+train$conf_perf_away_num <- as.numeric(factor(train$conf_perf_away, 
+                                               levels = names(round_order)))
+valid$conf_perf_home_num <- as.numeric(factor(valid$conf_perf_home, 
+                                               levels = names(round_order)))
+valid$conf_perf_away_num <- as.numeric(factor(valid$conf_perf_away, 
+                                               levels = names(round_order)))
+
+
+drop_cols <- c("season", "home_id", "away_id", 
+               "home_short_display_name", "away_short_display_name",
+               "conf_perf_home", "conf_perf_away")
+
+train_xgb        <- train[, !names(train) %in% drop_cols]
+valid_xgb        <- valid[, !names(valid) %in% drop_cols]
+conditional_xgb  <- conditional_data_final[, !names(conditional_data_final) %in% drop_cols]
+
+
+
+train_x <- model.matrix(Team_A_Winner ~ ., data = train_xgb)[, -1] #remove intercept
+
+train_y <- as.numeric(levels(train_xgb$Team_A_Winner))[train_xgb$Team_A_Winner]
+
+
+valid_x <- model.matrix(Team_A_Winner ~ ., data = valid_xgb)[,-1] #remove intercept
+
+valid_y <- as.numeric(levels(valid_xgb$Team_A_Winner))[valid_xgb$Team_A_Winner]
+
+colnames(train_x) <- make.names(colnames(train_x))
+colnames(valid_x) <- make.names(colnames(valid_x))
+
+train_x <- as.matrix(train_x)
+valid_x <- as.matrix(valid_x)
+```
+
+I start by running a cross validation search to minimize the number of trees on the validation set's root mean square error (RMSE). We see that 3 trees appears to be optimal.
+
+I then run a grid search across number of trees, learning rate, maximum depth of the trees, and subsampling. XGBoost is very flexible for hyperparameter tuning and grid searching. Lastly, I run these possible grid values through a 10-fold cross validation with XGBoost to determine the optimal parameters.
+
+We see that the best tune to this grid search is 3 trees, a max depth of 2, a learning rate of 0.4, subsample ratio of columns when constructing each tree of 1, and subsample ratio of 1.
+
+```{r}
+# xgb.cv(
+#   data                  = dtrain,
+#   nrounds               = 500,        # set high - early stopping will cut it short
+#   nfold                 = 10,
+#   early_stopping_rounds = 20,         # stop if no improvement after 20 rounds
+#   verbose               = 1
+# )
+```
+
+```{r message = FALSE, warning = FALSE, echo = FALSE}
+dtrain <- xgb.DMatrix(
+  data  = train_x,
+  label = train_y
+)
+
+# Define the grid to optimize hyperparameters
+tune_grid <- expand.grid(
+  nrounds = 3, #103
+  eta = c(0.01, 0.1, 0.2, 0.3, 0.4),
+  max_depth = 2:5,
+  gamma = c(0),
+  colsample_bytree = c(0.9, 1),
+  min_child_weight = 1,
+  subsample = c(0.8, 0.9, 1)
+)
+
+results <- list()
+
+for (i in seq_len(nrow(tune_grid))) {
+  params <- list(
+    objective        = "binary:logistic",
+    eval_metric      = "auc",
+    eta              = tune_grid$eta[i],
+    max_depth        = tune_grid$max_depth[i],
+    gamma            = tune_grid$gamma[i],
+    colsample_bytree = tune_grid$colsample_bytree[i],
+    min_child_weight = tune_grid$min_child_weight[i],
+    subsample        = tune_grid$subsample[i]
+  )
+  
+  set.seed(12345)
+  cv_result <- xgb.cv(
+    params               = params,
+    data                 = dtrain,
+    nrounds              = tune_grid$nrounds[i],
+    nfold                = 10,
+    verbose              = 0
+  )
+  
+  best_auc     <- max(cv_result$evaluation_log$test_auc_mean, na.rm = TRUE)
+  best_nrounds <- tune_grid$nrounds[i] 
+  
+  results[[i]] <- cbind(tune_grid[i, ], auc = best_auc)
+  cat(sprintf("Grid %d/%d | AUC: %.4f\n", i, nrow(tune_grid), best_auc))
+}
+
+# Find best parameters
+results_df <- do.call(rbind, results)
+best_row <- results_df[which.max(results_df$auc), ]
+print(best_row)
+
+# Train final model with best params
+best_params <- list(
+  objective        = "binary:logistic",
+  eval_metric      = "auc",
+  eta              = best_row$eta,
+  max_depth        = best_row$max_depth,
+  gamma            = best_row$gamma,
+  colsample_bytree = best_row$colsample_bytree,
+  min_child_weight = best_row$min_child_weight,
+  subsample        = best_row$subsample
+)
+
+set.seed(12345)
+xgb.mm <- xgb.train(
+  params  = best_params,
+  data    = dtrain,
+  nrounds = as.integer(best_row$nrounds[1]),
+  verbose = 1
+)
+```
+
+Lastly, I define the final model with the tuned parameters and look at variable importance. This plot will automatically cluster variables statistically based on similar gain. We see the most important cluster is the difference in a teams' wins above bubble (WAB). Likewise, the second most important cluster consists of adjusted offensive & defensive efficiency.
+
+The third best cluster contains Bart Torvik's BARTHAG, team blowout percentage, steals, and blocks.
+
+```{r message = FALSE, warning = FALSE, echo = FALSE}
+# variable importance
+xgb.ggplot.importance(xgb.importance(feature_names = colnames(train_x), model = xgb.mm)) +
+  theme_classic()
+
+
+```
+
+**Support Vector Machine (SVM)**
+
+For the next model to try, I explored a support vector machine (SVM) model. I used the svm() function since this is a classification problem and a radial kernel to capture more non-linearities in the data.
+
+```{r message= FALSE, warning = FALSE}
+#Building the svm model
+set.seed(12345)
+svm.mm <- svm(train_x, train_y, kernel = "radial", probability = TRUE)
+```
+
+**Naive Bayes**
+
+Now I explored a Naive Bayes model, another great supervised classification model. This looks to classify based on observations similar characteristics or features and also evaluates based on past decisions of observations similar to this one. This approach is an alternative to the frequentist approach in statistics, with instead trying a Bayesian approach.
+
+```{r warning = FALSE, message = FALSE}
+#resets training set & removes bins created above
+train <- matchup_final[matchup_final$season %in% c(2008:2022),] 
+valid <- matchup_final[matchup_final$season %in% c(2023,2024,2025),] 
+
+drop_cols <- c("season", "home_id", "away_id", 
+               "home_short_display_name", "away_short_display_name")
+
+train_nb        <- train[, !names(train) %in% drop_cols]
+valid_nb        <- valid[, !names(valid) %in% drop_cols]
+conditional_nb  <- conditional_data_final[, !names(conditional_data_final) %in% drop_cols]
+
+
+
+
+# tune_grid <- expand.grid(
+#   usekernel = c(TRUE, FALSE),
+#   fL = c(0, 0.5, 1),
+#   adjust = c(0.1, 0.5, 1)
+# )
+# 
+# set.seed(12345)
+# nb.mm.caret <- caret::train(Team_A_Winner ~ .  -season -home_id -away_id -home_short_display_name -away_short_display_name, data = train,
+#                             method = "nb", 
+#                             tuneGrid = tune_grid,
+#                             trControl = trainControl(method = 'cv', number = 10))
+# 
+# nb.mm.caret$bestTune
+
+set.seed(12345)
+nb.mm <- naiveBayes(Team_A_Winner ~., data = train_nb, laplace = 0, usekernel = TRUE, fL = 0, adjust = 0.1)
+
+```
+
+**Multivariate Adaptive Regression Splines (MARS)**
+
+MARS! This one is outta this world! Haha. This approach essentially uses piecewise regression to split into linear/non-linear patterns for each piece. Each split is a "knot" with more knots = more lines. MARS avoid overfitting with the knots by using generalized cross validation (GCV), a fast cross validation method.
+
+We see from the model summary that 8 of the 51 variables were used, which appear to be differences in:
+
+-   WAB
+-   BARTHAG
+-   Extra Scoring Chances
+-   Blowout %
+-   WL %
+-   Coach Career Win %
+-   Points per Game
+-   Blocks
+
+The variable importance printout also highlights the number of subsets we saw these variables occur in, so this model supports WAB, BARTHAG, and extra scoring chances as the most important (similar to other models).
+
+```{r warning = FALSE, message = FALSE}
+#resets training set & removes bins created above
+train <- matchup_final[matchup_final$season %in% c(2008:2022),] 
+valid <- matchup_final[matchup_final$season %in% c(2023,2024,2025),] 
+
+drop_cols <- c("season", "home_id", "away_id", 
+               "home_short_display_name", "away_short_display_name")
+
+train_earth        <- train[, !names(train) %in% drop_cols]
+valid_earth        <- valid[, !names(valid) %in% drop_cols]
+conditional_earth  <- conditional_data_final[, !names(conditional_data_final) %in% drop_cols]
+
+
+mars2 <- earth(Team_A_Winner ~ ., 
+               data = train_earth, 
+               glm = list(family = binomial(link= "logit")))
+summary(mars2)
+
+evimp(mars2)
+```
+
+## Model Comparison
+
+Now that I have built these models, let's compare on the validation sets. The main takeaways from this output are that the Random Forest, Naive Bayes, and XGBoost perform the best. I think it is odd the MARS model did not perform as well, considering it has performed strongly in the past.
+
+```{r warning = FALSE, message = FALSE}
+
+model_eval_df <- data.frame(Model = character(),
+                            Valid_AUC = numeric())
+
+
+#log reg
+p_hat <- predict(new.model, newdata = valid_LR, type = "response")
+logit_roc_v <- rocit(p_hat, valid_LR$Team_A_Winner)
+
+
+model_eval_df <- rbind(model_eval_df, c("Logistic Regression", logit_roc_v$AUC))
+
+conditional_data_final$espnLogReg <- predict(new.model, 
+                                             newdata = conditional_LR, 
+                                             type = 'response')
+
+conditional_data_final$winnerLogReg <- ifelse(conditional_data_final$espnLogReg > plot(logit_roc_v)$optimal[4],1, 0)
+
+
+
+#xgboost
+p_hat <- predict(xgb.mm, newdata = valid_x, type = "prob")
+logit_roc_v <- rocit(p_hat, valid_y)
+
+model_eval_df <- rbind(model_eval_df, c("XGBoost", logit_roc_v$AUC))
+
+conditional_data_final_x <- model.matrix(~., 
+                                  data = conditional_xgb)[,c(-1)]
+
+conditional_data_final$espnXGB <- predict(xgb.mm, 
+                                   newdata = conditional_data_final_x, 
+                                   type = 'prob')
+
+conditional_data_final$winnerXGB <- ifelse(conditional_data_final$espnXGB > plot(logit_roc_v)$optimal[4],1, 0)
+
+
+
+#Random Forest
+p_hat <- predict(rf.mm, newdata = valid_rf, type = "prob")
+logit_roc_v <- rocit(p_hat[,2], valid_rf$Team_A_Winner)
+
+model_eval_df <- rbind(model_eval_df, c("Random Forest", logit_roc_v$AUC))
+
+conditional_data_final$espnRF <- predict(rf.mm, newdata = conditional_rf, type = 'prob')
+conditional_data_final$winnerRF <- ifelse(conditional_data_final$espnRF[,2] > plot(logit_roc_v)$optimal[4],1, 0)
+
+
+
+#mars: 
+p_hat <- predict(mars2, newdata = valid_earth, type = 'response')
+logit_roc_v <- rocit(p_hat[,1], valid_earth$Team_A_Winner)
+
+model_eval_df <- rbind(model_eval_df, c("MARS", logit_roc_v$AUC))
+
+conditional_data_final$espnMARS <- predict(mars2, newdata = conditional_earth, type = 'response')
+
+conditional_data_final$winnerMARS <- ifelse(conditional_data_final$espnMARS[,1] > plot(logit_roc_v)$optimal[4],1, 0)
+
+
+
+#svm
+p_hat <- predict(svm.mm, newdata = valid_x, probability = TRUE)
+logit_roc_v <- rocit(p_hat, valid_y)
+
+model_eval_df <- rbind(model_eval_df, c("SVM",logit_roc_v$AUC))
+
+conditional_data_final$espnSVM <- predict(svm.mm, newdata = conditional_data_final_x)
+
+conditional_data_final$winnerSVM <- ifelse(conditional_data_final$espnSVM > plot(logit_roc_v)$optimal[4],1, 0)
+
+
+
+
+#naive bayes
+p_hat <- predict(nb.mm, newdata = valid_nb, type = 'raw')
+logit_roc_v <- rocit(p_hat[,2], valid_nb$Team_A_Winner)
+
+model_eval_df <- rbind(model_eval_df, c("Naive Bayes", logit_roc_v$AUC))
+
+conditional_data_final$espnNB <- predict(nb.mm, newdata = conditional_nb, type = 'raw')
+
+conditional_data_final$winnerNB <- ifelse(conditional_data_final$espnNB[,2] > plot(logit_roc_v)$optimal[4],1, 0)
+
+
+colnames(model_eval_df) <- c("Model", "Valid_AUC")
+model_eval_df %>%
+  arrange(desc(Valid_AUC))
+```
+
+## Results
+
+The Random Forest favored upsets more than the other models, while the XGBoost did better in years that were more chalk (like 2025). I decided to ensemble the latter 4 models (MARS, Naive Bayes, SVM, and Logistic Regression) as its own 3rd model. With this, if at least 2 of the 4 models predicted a higher seed winning, I went with the higher seed.
+
+After training the model on the 2008-2022 matchups and evaluating how well the model performs on the 2023-2025 validation set, I am interested in how well it performs in terms of the ESPN March Madness brackets, which is total points. Therefore, I ran the models on every conditional matchup for the year 2023-2025 to test what the corresponding ESPN points will be from the best models (and if there is a significant difference from the AUC). This was a very manual process.
+
+-   For the 2023-2025 March Madness tournaments, the 2008-2022 Random Forest model performed the best, while doing an excellent job at identifying early round upsets, such as:
+    -   15 seed Princeton Sweet 16 run (**2023**)
+    -   5 seed San Diego State winning the championship (they lost in the **2023** championship!)
+    -   11 seed NC State to the Elite 8 (and they even surpassed this expectation! **2024** DJ Burnsss!)
+    -   11 seed Duquesne over BYU and 12 seeds Grand Canyon + James Madison over Saint Mary's + Wisconsin, respectively **(2024)**
+    -   12 seed Colorado State over Memphis **(2025)**
+
+While I am excited about the Random Forest predicting these matchups correctly, there were also gross inaccuracies, such as sending 12 seed Drake or Grand Canyon to the Final Four. One trend I noticed in these types of predictions were that there was a signal there... just not a Final Four worthy team. I manually over-rode some of those decisions with just a Round of 64 win for that team.
+
+Another interesting finding I saw was that there were certain regions of the bracket where the model predicted BOTH a 12 and 13 seed upset. A lot of times in these cases, it was actually the opposite!
+
+I was really surprised the MARS model did not do well, as I thought that works the best with sports data.
+
+Overall, the ESPN scores on the 2023-2025 brackets ranged: - Random Forest: 650-1140 - XGBoost: 420-1000 - Other 4 Model Ensemble: 700-850
+
+Like I said, if I take the raw output of these models they might not do as well. But I provided some manual overriding to these outputs in order to improve predictions.
+
+```{r message = FALSE, warning = FALSE}
+#Function test conditional results on 2023-2025 brackets
+conditional_data_final %>%
+    filter(season == 2024,
+           home_short_display_name == "Houston",
+           away_short_display_name == "UConn") %>%
+    mutate(other4Models = ifelse(winnerLogReg + winnerMARS + winnerSVM + winnerNB>=2, "team_a", "team_b")) %>%
+  dplyr::select(season, team_a = home_short_display_name,
+                team_b = away_short_display_name,
+                winnerXGB,
+                winnerRF,
+                other4Models)
+
+#Looking at winners
+View(conditional_data_final %>%
+       dplyr::select(season, home_short_display_name,
+                     away_short_display_name,
+                     winnerRF,
+                     winnerXGB,
+                     winnerLogReg,
+                     winnerMARS,
+                     winnerNB,
+                     winnerSVM)
+
+)
+```
+
+**2026 Predictions**
+
+Here is my projected Final Four for the raw Random Forest, XGBoost, and Other4 Ensemble models, as well as my Final Four for the "manual overriding" of some of the Random Forest.
+
+Notably, many of the models predict Michigan as the winner, which as an avid Penn State fan, it was difficult to submit brackets with Michigan winning. However, they look great this year.
+
+Notably, a lot of the models really were against sending many 1 seeds to the Final 4, so I made sure to have at least 2 in the manual override bracket.
+
+Random Forest **(predicted champion: Gonzaga)**
+
+-   South Florida (11 seed)
+
+-   Iowa (9 seed)
+
+-   Gonzaga (3 seed)
+
+-   Michigan (1 seed)
+
+XGBoost **(predicted champion: Michigan)**
+
+-   Vanderbilt (5 seed)
+
+-   UConn (2 seed)
+
+-   Michigan (1 seed)
+
+-   Purdue (2 seed)
+
+Other 4 Models (MARS, Naive Bayes, SVM, Logistic Regression) **(predicted champion: Michigan)**
+
+-   Vanderbilt (5 seed)
+
+-   St. John's (5 seed)
+
+-   Michigan (1 seed)
+
+-   Purdue (2 seed)
+
+Random Forest (w/ some human intervention) **(predicted champion: Michigan)**
+
+-   Illinois (3 seed)
+
+-   UConn (2 seed)
+
+-   Michigan (1 seed)
+
+-   Arizona (1 seed)
+
+*Post Tourney Update:* Will update after the tournament
+
+**Testing on 2026 data**
+
+The code below re-runs the two best models on the 2026 March Madness bracket by combining the full 2008-2025 training and validation set into one, ultimately assisting in my predictions for the 2026 tournament.
+
+```{r message = FALSE, warning = FALSE}
+
+################################################################
+### Reading in Set
+################################################################
+
+
+# Building all models
+mm_data <- read.csv("final_df_no_bounds.csv")
+mm_data <- mm_data[, -1]
+
+mm_data$tourney_perf <- factor(
+  mm_data$tourney_perf,
+  levels = c("First Four - L", "R64 - L", 
+             "R32 - L", "S16 - L", "E8 - L",
+             "F4 - L", "Final - L",
+             "Final - W")
+)
+
+mm_data$tourney_summary <- factor(
+  mm_data$tourney_summary,
+  levels = c("First Four", "R64", 
+             "R32", "S16", "E8",
+             "F4", "Final")
+)
+
+mm_data$conf_perf <- factor(
+  mm_data$conf_perf,
+  levels = c("Did Not Play in Conference Tournament", "Early Round - L", 
+             "Quarterfinals - L", "Semifinals - L", "Final - L",
+             "Final - W")
+)
+
+mm_data$womens_team_tourney_flag <- factor(mm_data$womens_team_tourney_flag)
+mm_data$team_name <- factor(mm_data$team_name)
+mm_data$season <- factor(mm_data$season)
+mm_data$power_conf <- factor(mm_data$power_conf)
+mm_data$power_conf_extra <- factor(mm_data$power_conf_extra)
+mm_data$Conference <- factor(mm_data$Conference)
+
+
+################################################################
+### Matchup Set
+################################################################
+
+
+mm_matchup <- read.csv("matchups.csv")
+
+#Data cleanup
+mm_matchup$season <- as.factor(mm_matchup$season)
+
+#Creating target variable
+mm_matchup$Team_A_Winner <- as.factor(ifelse(mm_matchup$home_winner, 1, 0))
+
+
+#Temporarily converting the binary flags to numeric so I can subtract them
+mm_data$womens_team_tourney_flag <- as.numeric(as.character(mm_data$womens_team_tourney_flag))
+mm_data$power_conf <- as.numeric(as.character(mm_data$power_conf))
+mm_data$power_conf_extra <- as.numeric(as.character(mm_data$power_conf_extra))
+
+#Removing variables that won't be in final model
+mm_data <- mm_data %>%
+  dplyr::select(-tourney_summary, -tourney_perf, -deep_run, -Conference)
+
+#Fixing Data Since First Four Games on Tues/Wed are not uploaded to hoopR yet
+mm_matchup <- mm_matchup %>%
+  mutate(
+    away_id = case_when(
+      X == 1143 ~ 193,
+      X == 1138 ~ 2504,
+      TRUE      ~ away_id
+    ),
+    away_short_display_name = case_when(
+      X == 1143 ~ "Miami OH",
+      X == 1138 ~ "Prairie View",
+      TRUE      ~ away_short_display_name
+    )
+  )
+
+#Join team stats for matchups
+matchup_full <- mm_matchup %>%
+  left_join(mm_data, by = c("home_id" = "team_id", "season")) %>%
+  rename_with(~paste0(., "_home"), .cols = -colnames(mm_matchup)) 
+  
+matchup_full <- matchup_full %>%
+  left_join(mm_data, by = c("away_id" = "team_id", "season")) %>%
+  rename_with(~paste0(., "_away"), .cols = -colnames(matchup_full))
+  
+#identify numeric columns
+numeric_vars <- mm_data %>% 
+  dplyr::select(where(is.numeric)) %>%
+  # Remove the ID columns so we don't try to subtract team_ids
+  dplyr::select(-any_of(c("team_id"))) %>% 
+  colnames()
+
+#define full dataframe
+matchup_final <- matchup_full
+
+#Loop to difference columns
+for (var in numeric_vars) {
+  home_col <- paste0(var, "_home")
+  away_col <- paste0(var, "_away")
+  diff_col <- paste0(var, "_diff")
+  
+  matchup_final[[diff_col]] <- matchup_final[[home_col]] - matchup_final[[away_col]]
+}
+
+#Drop home and away fields, only want the differened columns
+cols_to_drop <- c(paste0(numeric_vars, "_home"), paste0(numeric_vars, "_away"))
+
+matchup_final <- matchup_final %>%
+  dplyr::select(-any_of(cols_to_drop), -X)
+
+
+#Convert binary flags back to 0/1 factor variables
+matchup_final$womens_team_tourney_flag_diff <- as.factor(matchup_final$womens_team_tourney_flag_diff)
+matchup_final$power_conf_diff <- as.factor(matchup_final$power_conf_diff)
+matchup_final$power_conf_extra_diff <- as.factor(matchup_final$power_conf_extra_diff)
+
+
+matchup_final <- matchup_final %>%
+  dplyr::select(-game_date, -home_winner, -away_winner,
+                -team_name_home, -team_name_away)
+
+
+################################################################
+### Conditional Matchup Set
+################################################################
+
+teams_per_season <- matchup_full %>%
+  filter(season %in% c(2026)) %>%
+  dplyr::select(season, home_id, home_short_display_name) %>%
+  rename(team_id = home_id, team_name = home_short_display_name) %>%
+  bind_rows(
+    matchup_full %>%
+      filter(season %in% c(2026)) %>%
+      dplyr::select(season, away_id, away_short_display_name) %>%
+      rename(team_id = away_id, team_name = away_short_display_name)
+  ) %>%
+  distinct(season, team_id, team_name)
+
+# Generate all possible matchups per season
+conditional_matchup_final <- teams_per_season %>%
+  group_by(season) %>%
+  group_modify(~ {
+    teams <- .x
+    # Create all ordered pairs (A vs B and B vs A are both included)
+    expand.grid(
+      home_idx = seq_len(nrow(teams)),
+      away_idx = seq_len(nrow(teams))
+    ) %>%
+      filter(home_idx != away_idx) %>%  # remove self-matchups
+      transmute(
+        home_id   = teams$team_id[home_idx],
+        home_short_display_name = teams$team_name[home_idx],
+        away_id   = teams$team_id[away_idx],
+        away_short_display_name = teams$team_name[away_idx]
+      )
+  }) %>%
+  ungroup()
+
+# Check output
+cat("Total matchups generated:", nrow(conditional_matchup_final), "\n")
+cat("Matchups per season:\n")
+print(table(conditional_matchup_final$season))
+
+# Verify - for a 64 team tournament each team should play 63 others
+teams_per_season %>%
+  count(season, name = "n_teams") %>%
+  mutate(expected_matchups = n_teams * (n_teams - 1)) %>%
+  print()
+
+
+
+#Join team stats for conditional matchups
+conditional_dat <- conditional_matchup_final %>%
+  left_join(mm_data, by = c("home_id" = "team_id", "season")) %>%
+  rename_with(~paste0(., "_home"), .cols = -colnames(conditional_matchup_final)) 
+  
+conditional_dat <- conditional_dat %>%
+  left_join(mm_data, by = c("away_id" = "team_id", "season")) %>%
+  rename_with(~paste0(., "_away"), .cols = -colnames(conditional_dat))
+
+
+conditional_data_final <- conditional_dat
+
+#Loop to difference columns
+for (var in numeric_vars) {
+  home_col <- paste0(var, "_home")
+  away_col <- paste0(var, "_away")
+  diff_col <- paste0(var, "_diff")
+  
+  conditional_data_final[[diff_col]] <- conditional_data_final[[home_col]] - conditional_data_final[[away_col]]
+}
+
+conditional_data_final <- conditional_data_final %>%
+  dplyr::select(-any_of(cols_to_drop))
+
+
+#Convert binary flags back to 0/1 factor variables
+conditional_data_final$womens_team_tourney_flag_diff <- as.factor(conditional_data_final$womens_team_tourney_flag_diff)
+
+conditional_data_final$power_conf_diff <- as.factor(conditional_data_final$power_conf_diff)
+
+conditional_data_final$power_conf_extra_diff <- as.factor(conditional_data_final$power_conf_extra_diff)
+
+
+mm_data$womens_team_tourney_flag <- as.factor(mm_data$womens_team_tourney_flag)
+mm_data$power_conf <- as.factor(mm_data$power_conf)
+mm_data$power_conf_extra <- as.factor(mm_data$power_conf_extra)
+
+conditional_data_final <- conditional_data_final %>%
+  dplyr::select(-team_name_home, -team_name_away)
+
+
+#Need to numeric encode the conference performance variables
+round_order <- c(
+  "Did Not Play in Conference Tournament" = 0,
+  "Early Round - L" = 1,
+  "Quarterfinals - L" = 2,
+  "Semifinals - L" = 3,
+  "Final - L" = 4,
+  "Final - W" = 5
+)
+
+
+conditional_data_final$conf_perf_home_num <- as.numeric(factor(conditional_data_final$conf_perf_home, 
+                                               levels = names(round_order)))
+
+conditional_data_final$conf_perf_away_num <- as.numeric(factor(conditional_data_final$conf_perf_away, 
+                                               levels = names(round_order)))
+
+```
+
+Now, modeling:
+
+```{r}
+train <- matchup_final[matchup_final$season %in% c(2008:2025),] 
+test <- matchup_final[matchup_final$season %in% c(2026),] 
+
+test <- test %>%
+  filter(home_id != -1)
+
+conditional_data_final <- conditional_data_final %>%
+  filter(!home_id %in% c(-1, -2), !away_id %in% c(-1, -2)) 
+
+train <- as.data.frame(train) #this helps SMBinning work
+test <- as.data.frame(test) #this helps SMBinning work
+
+
+##################################################################
+### Log Reg
+###################################################################
+drop_cols <- c("season", "home_id", "away_id", 
+               "home_short_display_name", "away_short_display_name")
+
+train_LR        <- train[, !names(train) %in% drop_cols]
+test_LR        <- test[, !names(test) %in% drop_cols]
+conditional_LR  <- conditional_data_final[, !names(conditional_data_final) %in% drop_cols]
+
+#need to add a fake Team_A_Winner column to get the binning to work
+new_binary_var <- sample(c(0, 1), size = nrow(conditional_LR), replace = TRUE) 
+
+# Add the new variable to the front of the dataframe using cbind
+conditional_LR <- cbind("Team_A_Winner" = new_binary_var, conditional_LR)
+
+var.names <- names(train_LR)[sapply(train_LR, is.numeric)]
+
+
+train_LR$Team_A_Winner <- as.numeric(as.character(train_LR$Team_A_Winner))
+
+
+for (j in var.names) {
+  if (is.na(allBins[[j]]["iv"])) {
+    next
+  } else if (allBins[[j]]["iv"] >= 0.01) {
+    train_LR <- smbinning.gen(df = train_LR, ivout = allBins[[j]], chrname = paste(j, "_bin", sep = ""))
+  }
+}
+
+
+for (j in var.names) {
+  if (is.na(allBins[[j]]["iv"])) {
+    next
+  } else if (allBins[[j]]["iv"] >= 0.01) {
+    conditional_LR <- smbinning.gen(df = conditional_LR, ivout = allBins[[j]], chrname = paste(j, "_bin", sep = ""))
+  }
+}
+
+
+new.model <- glm(Team_A_Winner ~ blk_diff_bin + extraScoreChances_diff_bin + AdjOE_diff_bin + 
+    AdjDE_diff_bin, 
+                 data = train_LR, 
+                 family = binomial(link = "logit"))
+
+
+######################################################################
+### Random Forest
+######################################################################
+#resets training set & removes bins created above
+train <- matchup_final[matchup_final$season %in% c(2008:2025),] 
+test <- matchup_final[matchup_final$season %in% c(2026),] 
+
+drop_cols <- c("season", "home_id", "away_id", 
+               "home_short_display_name", "away_short_display_name")
+
+train_rf        <- train[, !names(train) %in% drop_cols]
+test_rf        <- test[, !names(test) %in% drop_cols]
+conditional_rf  <- conditional_data_final[, !names(conditional_data_final) %in% drop_cols]
+
+set.seed(12345)
+rf.mm <- randomForest(Team_A_Winner ~ ., 
+                      data = train_rf, ntree = 500, mtry = 7, importance = TRUE,
+                      method = 'class')
+
+#####################################################################
+### XGBoost
+#####################################################################
+#resets training set & removes bins created above
+train <- matchup_final[matchup_final$season %in% c(2008:2025),] 
+test <- matchup_final[matchup_final$season %in% c(2026),] 
+
+
+#Need to numeric encode the conference performance variables
+round_order <- c(
+  "Did Not Play in Conference Tournament" = 0,
+  "Early Round - L" = 1,
+  "Quarterfinals - L" = 2,
+  "Semifinals - L" = 3,
+  "Final - L" = 4,
+  "Final - W" = 5
+)
+
+#Create numeric versions of conf_perf columns
+train$conf_perf_home_num <- as.numeric(factor(train$conf_perf_home, 
+                                               levels = names(round_order)))
+train$conf_perf_away_num <- as.numeric(factor(train$conf_perf_away, 
+                                               levels = names(round_order)))
+test$conf_perf_home_num <- as.numeric(factor(test$conf_perf_home, 
+                                               levels = names(round_order)))
+test$conf_perf_away_num <- as.numeric(factor(test$conf_perf_away, 
+                                               levels = names(round_order)))
+
+
+drop_cols <- c("season", "home_id", "away_id", 
+               "home_short_display_name", "away_short_display_name",
+               "conf_perf_home", "conf_perf_away")
+
+train_xgb        <- train[, !names(train) %in% drop_cols]
+test_xgb        <- test[, !names(test) %in% drop_cols]
+conditional_xgb  <- conditional_data_final[, !names(conditional_data_final) %in% drop_cols]
+
+
+
+train_x <- model.matrix(Team_A_Winner ~ ., data = train_xgb)[, -1] #remove intercept
+
+train_y <- as.numeric(levels(train_xgb$Team_A_Winner))[train_xgb$Team_A_Winner]
+
+
+test_x <- model.matrix(Team_A_Winner ~ ., data = test_xgb)[,-1] #remove intercept
+
+test_y <- as.numeric(levels(test_xgb$Team_A_Winner))[test_xgb$Team_A_Winner]
+
+colnames(train_x) <- make.names(colnames(train_x))
+colnames(test_x) <- make.names(colnames(test_x))
+
+train_x <- as.matrix(train_x)
+test_x <- as.matrix(test_x)
+
+
+dtrain <- xgb.DMatrix(
+  data  = train_x,
+  label = train_y
+)
+
+
+set.seed(12345)
+xgb.mm <- xgb.train(
+  params  = best_params,
+  data    = dtrain,
+  nrounds = as.integer(best_row$nrounds[1]),
+  verbose = 1
+)
+
+
+#####################################################################
+### SVM
+#####################################################################
+set.seed(12345)
+svm.mm <- svm(train_x, train_y, kernel = "radial", probability = TRUE)
+
+
+#####################################################################
+### Naive Bayes
+#####################################################################
+#resets training set & removes bins created above
+train <- matchup_final[matchup_final$season %in% c(2008:2025),] 
+test <- matchup_final[matchup_final$season %in% c(2026),] 
+
+drop_cols <- c("season", "home_id", "away_id", 
+               "home_short_display_name", "away_short_display_name")
+
+train_nb        <- train[, !names(train) %in% drop_cols]
+test_nb        <- test[, !names(test) %in% drop_cols]
+conditional_nb  <- conditional_data_final[, !names(conditional_data_final) %in% drop_cols]
+
+
+set.seed(12345)
+nb.mm <- naiveBayes(Team_A_Winner ~., data = train_nb, laplace = 0, usekernel = TRUE, fL = 0, adjust = 0.1)
+
+
+
+#####################################################################
+### MARS
+#####################################################################
+
+#resets training set & removes bins created above
+train <- matchup_final[matchup_final$season %in% c(2008:2025),] 
+test <- matchup_final[matchup_final$season %in% c(2026),] 
+
+drop_cols <- c("season", "home_id", "away_id", 
+               "home_short_display_name", "away_short_display_name")
+
+train_earth        <- train[, !names(train) %in% drop_cols]
+test_earth        <- test[, !names(test) %in% drop_cols]
+conditional_earth  <- conditional_data_final[, !names(conditional_data_final) %in% drop_cols]
+
+
+mars2 <- earth(Team_A_Winner ~ ., 
+               data = train_earth, 
+               glm = list(family = binomial(link= "logit")))
+
+  
+  
+```
+
+Now let's predict the test set:
+
+```{r}
+
+#log reg
+conditional_data_final$espnLogReg <- predict(new.model, 
+                                             newdata = conditional_LR, 
+                                             type = 'response')
+
+conditional_data_final$winnerLogReg <- ifelse(conditional_data_final$espnLogReg > 0.6799616,1, 0)
+
+
+
+#xgboost
+conditional_data_final_x <- model.matrix(~., 
+                                  data = conditional_xgb)[,c(-1)]
+
+conditional_data_final$espnXGB <- predict(xgb.mm, 
+                                   newdata = conditional_data_final_x, 
+                                   type = 'prob')
+
+conditional_data_final$winnerXGB <- ifelse(conditional_data_final$espnXGB > 0.6763592,1, 0)
+
+
+
+#Random Forest
+conditional_data_final$espnRF <- predict(rf.mm, newdata = conditional_rf, type = 'prob')
+conditional_data_final$winnerRF <- ifelse(conditional_data_final$espnRF[,2] > 0.736 ,1, 0)
+
+
+
+#mars: 
+conditional_data_final$espnMARS <- predict(mars2, newdata = conditional_earth, type = 'response')
+
+conditional_data_final$winnerMARS <- ifelse(conditional_data_final$espnMARS[,1] > 0.6369329 ,1, 0)
+
+
+
+#svm
+conditional_data_final$espnSVM <- predict(svm.mm, newdata = conditional_data_final_x)
+
+conditional_data_final$winnerSVM <- ifelse(conditional_data_final$espnSVM > 0.9126135 ,1, 0)
+
+
+
+
+#naive bayes
+conditional_data_final$espnNB <- predict(nb.mm, newdata = conditional_nb, type = 'raw')
+
+conditional_data_final$winnerNB <- ifelse(conditional_data_final$espnNB[,2] > 0.94309 ,1, 0)
+
+```
+
+Evaluation:
+
+```{r}
+conditional_data_final %>%
+    filter(season == 2026,
+           home_short_display_name == "Houston",
+           away_short_display_name == "UConn") %>%
+    mutate(other4Models = ifelse(winnerLogReg + winnerMARS + winnerSVM + winnerNB>=2, "team_a", "team_b")) %>%
+  dplyr::select(season, team_a = home_short_display_name,
+                team_b = away_short_display_name,
+                winnerXGB,
+                winnerRF,
+                other4Models)
+
+
+View(conditional_data_final %>%
+       dplyr::select(season, home_short_display_name,
+                     away_short_display_name,
+                     winnerRF,
+                     winnerXGB,
+                     winnerLogReg,
+                     winnerMARS,
+                     winnerNB,
+                     winnerSVM))
+```
+
+## Areas of Improvement
+
+While I thoroughly enjoyed the process of creating machine learning models to predict the winners of March Madness, I also noted so areas of improvement, limitations, or future opportunities:
+
+-   **NIL \$ Spend** - As we enter the age of NIL, I think it could be helpful to include NIL spend (or, since this is not particularly public information, I can try to create a proxy for team spend). As we saw in the 2025 tournament, there were four 1-seeds in the Final 4 and the bracket was fairly chalk through the Sweet 16. The lack of upsets can potentially be correlated with NIL valuation.
+
+    -   To that point, there is also a rise of G-League players potentially rejoining NCAA teams, so I will have to consider how they impact the sport.
+
+-   **Injury Modeling Improvement** - I currently have a variable to model players who missed games during the regular season & the percentage of total minutes that they impacted the team. However, diving deeper in to injury data requires a historical record of logged injuries for players dating back to 2008, which due to college rules, is not required or available. Something along the lines of this article: <https://www.statswithsasa.com/2024/03/18/march-madness-injuries/>
+
+-   **Different Target Variable** - I would like to consider modeling a team's margin of victory as a continuous predictor variable, however to still use this as a predictor of each matchup. Switching up the target variable could offer additional insights in to the teams and create a unique model to ensemble with a binary classification.
+
+-   **Non-Conference Performance** - Other variables I have considered is including non-conference performance specifically (which I technically separated as the 1st half of the season). This was especially noticeable with 2024 Clemson, who despite being very underrated before the tournament - ended up going on an Elite 8 Run. They played poorly in ACC but dominated out of conference games.
+
+-   **Model Evaluation by Round** - In addition to variables to add to the model, I think it could be interesting to structure the model based on performance in each round (or build separate models for each, as there could be various signals for each round of the tournament).
+
+-   **Median vs. Mean** - I currently pull averages of all of my variables, but it could slighlty improve the signal of the model by using the median instead of the mean, or even including other summary statistic variables like min, max, standard deviation, etc.
+
+-   **Data per Possession** - It could be beneficial to pull the team stats on a per possession view as well, not per game average. Since tempo is usually a significant variable in the modeling process, then breaking out performance per possession could make for a more interesting method to predict winners.
+
+-   **Change Evaluation** - Instead of analyzing just the matchups, I could build a simulation-esque analysis, where we simulate how the team would perform against every other team in the tournament and use that to determine who wins each matchup. This answers the question: do they have a bad matchup, or are they an underrated team?
+
+## References and Acknowledgements
+
+I want to give a few shoutouts, which greatly helped me in this personal project. Firstly, thank you to **Saiem Gilani** and **Bart Torvik** for the hoopR package and Bart Torvik data, which made this analysis possible. Next, I want to thank **Russ Spicer**, a long-time D3 college basketball head coach, who offered many insights in to the structure and thought of making March Madness picks. Lastly, I want to thank my roommate **Andy Chapman**, who asked for a shoutout in giving the recommendation on building coaching variables.
+
+-   **TeamRankings.com** historical CBB team stats
+
+-   **SportsReference.com** historical CBB team/coach stats
+
+-   **BartTorvik.com** historical CBB stats (especially efficiency metrics)
+
+-   **KenPom.com** did not use data but referenced methodology
+
+-   [**https://rpubs.com/DenJackson/marchmadness**](https://rpubs.com/DenJackson/marchmadness){.uri} helpful resource where I modeled my project after
+
+-   [**https://www.printyourbrackets.com/images/marchmadness-2023.pdf**](https://www.printyourbrackets.com/images/marchmadness-2023.pdf){.uri} historical bracket performance for any year
+
+## Additional Code Appendix
+
+This appendix serves as additional code I wrote to build out the logic and motivation behind certain decisions.
+
+1.  **Optimal Weights for 1-H, 2-H Home, 2-H Away**
+
+I needed to determine the optimal weighting of the first half, second half/home, and second half/away portions of the season in order to build out my analysis. To keep it as simple as possible, I created a target variable called "deep run" which determined if the team went to at least the Elite 8 or not. Second, I ran a quick logistic regression on the entire weighted dataframe to see which weighting scheme returned the highest AUC.
+
+One small note here - Colgate was a tournament team in 2021, but did not start their season until January 1st, 2021 due to the COVID-19 pandemic. Their weighting scheme was slightly affected since they did not technically have a "first half" of the season.
+
+This strategy returned the highest AUC for a weighting scheme of **30% 1-H, 30% 2-H Home, and 40% 2-H Away**, when favoring the 2-H Away games.
+
+This strategy returned the highest AUC for a weighting scheme of **50% 1-H, 30% 2-H Home, and 20% 2-H Away**, when there are no bounds on the data. This was the weight used for the final model.
+
+*See Github optimal weight calculation.R file for code*
+
+2.  **Pythagorean Expectation**
+
+In order to calculate a team's expected winning percentage, I used the Pythagorean Expectation (originally derived from Bill James) which is the ratio of a team's total points raised to the n power, over the sum of their total points to the n power plus their opponent's total points to the n power. I ran a grid search on possible exponent values from 2 to 20 stepping by 0.1 to find the optimal exponent.
+
+In order to do that, I calculated how far off the team's true win percentage was off the expected win percentage using mean absolute error (MAE) and found the lowest MAE. This was minimized at an **exponent of 8.6.**
+
+*See Github pyth exp calculation.R file for code on calculation*
+
+3.  **Histograms**
+
+In order to save space in the output above, I am attaching all of the histograms from the final model here for visual support.
+
+All differenced variables show a Normal distribution, which is positive to see for the variables.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+var.names <- colnames(train)[c(9:53)]
+
+var.names <- var.names[!(var.names %in% c("womens_team_tourney_flag_diff", "power_conf_diff", "power_conf_extra_diff"))]
+
+for (i in var.names) {
+  hist(train[[i]], xlab = i)
+}
+```
+
+4.  **Variable Decisions**
+
+For the Bayesian shrinkage formula to calculate close game win percentage, the formula is:
+
+Adj_Win_Rate = (Wins + Global_Win_Rate + Prior_Strength) / (Games + Prior_Strength)
+
+For the pace formula, I chose a Y of 0.455, per Ken Pomeroy's blog <https://kenpom.com/blog/the-possession/>
