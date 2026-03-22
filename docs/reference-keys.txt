@@ -1,0 +1,14 @@
+march-madness-matchup-predictions
+introduction
+methodology
+exploratory-data-analysis-eda
+visual-exploration
+modeling-preparation
+modeling
+model-comparison
+results
+areas-of-improvement
+references-and-acknowledgements
+additional-code-appendix
+the-pool-of-tears
+a-caucus-race-and-a-long-tale
