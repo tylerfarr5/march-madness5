@@ -10,5 +10,3 @@ results
 areas-of-improvement
 references-and-acknowledgements
 additional-code-appendix
-the-pool-of-tears
-a-caucus-race-and-a-long-tale
