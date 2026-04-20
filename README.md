@@ -10,3 +10,6 @@ This is a personal project intended to predict the winners of March Madness matc
 -   Update womens teams in tourney for that year (Check against: https://www.sports-reference.com/cbb/seasons/women/2025-school-stats.html)
 -   Update power_conf in tourney that year. Also - confirm no teams joined or left Big Ten, SEC, ACC, Big12, Big East
 -   Pull Bart Torvik CSV for the new year (should be two CSV's: 1st and 2nd half of season). Also - confirm no team_id's missing from Bart Torvik dataset. 
+
+Update to Python:
+https://www.kaggle.com/datasets/jonathanpilafas/2024-march-madness-statistical-analysis/data
